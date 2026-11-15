@@ -40,6 +40,10 @@ Arrows are calls at run time, except `bridge.UseAppIDs`, which installs the app 
 | Web page and API | `api_handlers.go`, `onboarding_handlers.go`, `web/` | User interface and REST API | No (calls the parts above) |
 | Router rules | `pkg/policy`, `pkg/renderer`, `pkg/routerpush`, `pkg/netstack`, `cmd/bombecam-net` | Block cloud video | No |
 
+### HEVC cameras on Linux
+
+The gateway publishes H.264 directly. For cameras that send HEVC, FFmpeg converts the video to H.264 for RTSP/HLS/WebRTC compatibility. On Linux, it probes accessible `/dev/dri/renderD*` devices and tests the installed FFmpeg's `h264_vaapi` encoder; when the probe succeeds it uses VAAPI hardware encoding, otherwise it logs the reason and uses the existing CPU `libx264` encoder. VAAPI requires an FFmpeg build with `h264_vaapi` support and permission to access the render device (for example, membership in the system's `render` group). Containers must also pass through `/dev/dri`. HEVC decoding remains on the CPU.
+
 ## How the key is used
 
 1. At start, `loadServerKeys` builds a `serverkey.Store` from the first source that is set, ending with the built-in `serverkey.LatestKnown` (see [CONFIGURATION.md](CONFIGURATION.md)).
