@@ -145,6 +145,8 @@ type ManagedCamera struct {
 	RTPPort          int
 	Session          *CameraSession
 	CancelStream     context.CancelFunc
+	streamDone       <-chan struct{} // guarded by StreamManager.mu
+	streamPaused     bool            // guarded by StreamManager.mu
 	Viewer           *bridge.Viewer
 	Signaling        *bridge.Signaling
 	Streaming        bool
@@ -314,6 +316,8 @@ type CameraRunner func(ctx context.Context, mc *ManagedCamera, dev bridge.Device
 // StreamManager coordinates camera enrollment, stream lifecycle, and persistent camera state.
 type StreamManager struct {
 	mu               sync.RWMutex
+	lifecycleMu      sync.Mutex
+	allStopped       bool
 	cameras          map[string]*ManagedCamera
 	rtspBase         string // Legacy accessor compatibility
 	publishRTSPBase  string
@@ -727,6 +731,10 @@ func (sm *StreamManager) SetCloud(c *bridge.Cloud) {
 // Enroll authoritatively enrolls camera IDs, starting streams for newly enrolled cameras
 // and stopping streams for unenrolled cameras. All IDs must exist in discovered inventory.
 func (sm *StreamManager) Enroll(cameraIDs []string, inventory []bridge.Device) ([]string, error) {
+	return sm.enroll(cameraIDs, inventory, nil)
+}
+
+func (sm *StreamManager) enroll(cameraIDs []string, inventory []bridge.Device, paused map[string]bool) ([]string, error) {
 	if len(cameraIDs) == 0 {
 		return nil, fmt.Errorf("no camera IDs provided: camera_ids array must not be empty")
 	}
@@ -799,9 +807,7 @@ func (sm *StreamManager) Enroll(cameraIDs []string, inventory []bridge.Device) (
 			}
 			allocatedPorts[rtpPort] = true
 
-			ctx, cancel := context.WithCancel(context.Background())
 			session := NewCameraSession(dev.UUID, dev.Name, sm.strictManual)
-			registerCameraSession(session)
 
 			publishBase := sm.publishRTSPBaseLocked()
 			consumerRTSP := sm.consumerRTSPBase
@@ -818,26 +824,19 @@ func (sm *StreamManager) Enroll(cameraIDs []string, inventory []bridge.Device) (
 				ConsumerHLSBase:  consumerHLS,
 				RTPPort:          rtpPort,
 				Session:          session,
-				CancelStream:     cancel,
+				streamPaused:     paused[id],
 				Freshness:        time.Now().UTC(),
 				sm:               sm,
 			}
 			sm.cameras[id] = mc
 
-			if sm.runner != nil {
-				go sm.runner(ctx, mc, dev, rtpPort)
+			if !mc.streamPaused && !sm.allStopped {
+				sm.startCameraLocked(mc)
+			} else {
+				mc.Transport = "Stopped"
 			}
-		} else if mc.CancelStream == nil {
-			dev := invMap[id]
-			ctx, cancel := context.WithCancel(context.Background())
-			session := NewCameraSession(dev.UUID, dev.Name, sm.strictManual)
-			registerCameraSession(session)
-			mc.Session = session
-			mc.CancelStream = cancel
-			mc.Freshness = time.Now().UTC()
-			if sm.runner != nil {
-				go sm.runner(ctx, mc, dev, mc.RTPPort)
-			}
+		} else if mc.CancelStream == nil && !mc.streamPaused && !sm.allStopped {
+			sm.startCameraLocked(mc)
 		}
 		idx++
 	}
@@ -950,7 +949,10 @@ func (sm *StreamManager) Unlock(uuid string) (*ManagedCamera, error) {
 	if !ok {
 		return nil, fmt.Errorf("camera not found")
 	}
-	mc.Session.Unlock()
+	mc.mu.RLock()
+	session := mc.Session
+	mc.mu.RUnlock()
+	session.Unlock()
 	return mc, nil
 }
 
@@ -962,17 +964,23 @@ func (sm *StreamManager) SetStrictManual(uuid string, manual bool) error {
 	if !ok {
 		return fmt.Errorf("camera not found")
 	}
-	mc.Session.SetStrictManual(manual)
+	mc.mu.RLock()
+	session := mc.Session
+	mc.mu.RUnlock()
+	session.SetStrictManual(manual)
 	return nil
 }
 
 // SetStreamActive updates the live streaming state, viewer, and signaling for an enrolled camera.
 func (sm *StreamManager) SetStreamActive(uuid string, active bool, v *bridge.Viewer, sig *bridge.Signaling, transport string) {
 	sm.mu.RLock()
+	defer sm.mu.RUnlock()
 	mc, ok := sm.cameras[uuid]
-	sm.mu.RUnlock()
 	if !ok {
 		return
+	}
+	if mc.CancelStream == nil {
+		active, v, sig, transport = false, nil, nil, "Stopped"
 	}
 
 	mc.mu.Lock()
@@ -1042,17 +1050,9 @@ func (sm *StreamManager) CloseAll() {
 func (sm *StreamManager) StopStreaming() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	sm.allStopped = true
 	for uuid, mc := range sm.cameras {
-		if mc.CancelStream != nil {
-			mc.CancelStream()
-			mc.CancelStream = nil
-		}
-		mc.mu.Lock()
-		mc.Streaming = false
-		mc.Transport = "Stopped"
-		mc.Freshness = time.Now().UTC()
-		mc.mu.Unlock()
-		unregisterCameraSession(uuid)
+		sm.stopCameraLocked(uuid, mc)
 	}
 }
 
@@ -1060,28 +1060,101 @@ func (sm *StreamManager) StopStreaming() {
 func (sm *StreamManager) StartStreaming() int {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	sm.allStopped = false
 	started := 0
 	for _, mc := range sm.cameras {
-		if mc.CancelStream != nil {
+		if mc.CancelStream != nil || mc.streamPaused {
 			continue
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		session := NewCameraSession(mc.UUID, mc.Name, sm.strictManual)
-		registerCameraSession(session)
-		mc.mu.Lock()
-		mc.Session = session
-		mc.Transport = "Starting"
-		mc.Freshness = time.Now().UTC()
-		dev := bridge.Device{UUID: mc.UUID, Name: mc.Name, Type: mc.Model}
-		rtpPort := mc.RTPPort
-		mc.mu.Unlock()
-		mc.CancelStream = cancel
-		if sm.runner != nil {
-			go sm.runner(ctx, mc, dev, rtpPort)
-		}
+		sm.startCameraLocked(mc)
 		started++
 	}
 	return started
+}
+
+// RestartActiveStreaming refreshes publisher addresses without changing stop preferences.
+func (sm *StreamManager) RestartActiveStreaming() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for uuid, mc := range sm.cameras {
+		if mc.CancelStream != nil {
+			sm.stopCameraLocked(uuid, mc)
+			sm.startCameraLocked(mc)
+		}
+	}
+}
+
+func (sm *StreamManager) stopCameraLocked(uuid string, mc *ManagedCamera) {
+	if mc.CancelStream != nil {
+		mc.CancelStream()
+		mc.CancelStream = nil
+	}
+	mc.mu.Lock()
+	mc.Streaming = false
+	mc.Transport = "Stopped"
+	mc.Freshness = time.Now().UTC()
+	mc.mu.Unlock()
+	unregisterCameraSession(uuid)
+}
+
+func (sm *StreamManager) startCameraLocked(mc *ManagedCamera) {
+	ctx, cancel := context.WithCancel(context.Background())
+	previous := mc.streamDone
+	done := make(chan struct{})
+	mc.CancelStream, mc.streamDone = cancel, done
+	session := NewCameraSession(mc.UUID, mc.Name, sm.strictManual)
+	mc.mu.Lock()
+	if previous == nil {
+		mc.Session = session
+	}
+	mc.Transport = "Starting"
+	mc.Freshness = time.Now().UTC()
+	dev := bridge.Device{UUID: mc.UUID, Name: mc.Name, Type: mc.Model}
+	rtpPort := mc.RTPPort
+	mc.mu.Unlock()
+	if previous == nil {
+		registerCameraSession(session)
+	}
+	runner := sm.runner
+	go func() {
+		defer close(done)
+		if previous != nil {
+			<-previous
+			sm.mu.Lock()
+			if ctx.Err() == nil && sm.cameras[mc.UUID] == mc {
+				mc.mu.Lock()
+				mc.Session = session
+				mc.mu.Unlock()
+				registerCameraSession(session)
+			}
+			sm.mu.Unlock()
+		}
+		if ctx.Err() == nil && runner != nil {
+			runner(ctx, mc, dev, rtpPort)
+		}
+	}()
+}
+
+func (sm *StreamManager) SetCameraPaused(uuid string, paused bool) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	mc, ok := sm.cameras[uuid]
+	if !ok {
+		return false
+	}
+	mc.streamPaused = paused
+	if paused {
+		sm.stopCameraLocked(uuid, mc)
+	} else if mc.CancelStream == nil {
+		sm.startCameraLocked(mc)
+	}
+	return true
+}
+
+func (sm *StreamManager) AllStopped() bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.allStopped
 }
 
 // IsStopped reports whether the camera was stopped from the UI/API.
@@ -1137,7 +1210,9 @@ func (sm *StreamManager) RetryMaxWait() time.Duration {
 // defaultRunner implements the real camera stream loop with recovery budget and lockout handling.
 func (sm *StreamManager) defaultRunner(ctx context.Context, mc *ManagedCamera, dev bridge.Device, rtpPort int) {
 	phoneCode := fmt.Sprintf("%032x", rand.Int63())
+	mc.mu.RLock()
 	session := mc.Session
+	mc.mu.RUnlock()
 	rtspURL := fmt.Sprintf("%s/%s", strings.TrimRight(sm.PublishRTSPBase(), "/"), dev.UUID)
 	lockouts := 0
 
@@ -1279,6 +1354,9 @@ func (sm *StreamManager) streamOnce(ctx context.Context, mc *ManagedCamera, c *b
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	sig, err := bridge.Connect(c.WsURL, c.APIToken, c.UID, phoneCode)
 	if err != nil {
 		return fmt.Errorf("ws: %w", err)
@@ -1426,6 +1504,9 @@ func (sm *StreamManager) streamOnce(ctx context.Context, mc *ManagedCamera, c *b
 		}
 	})
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := v.Start(); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}

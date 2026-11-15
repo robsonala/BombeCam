@@ -624,6 +624,7 @@ type streamsStreamEntry struct {
 	Model            string             `json:"model"`
 	StreamName       string             `json:"stream_name"`
 	Streaming        bool               `json:"streaming"`
+	Stopped          bool               `json:"stopped"`
 	PublicationReady bool               `json:"publication_ready"`
 	RTSPURL          string             `json:"rtsp_url"`
 	RTSPURLByID      string             `json:"rtsp_url_by_id"`
@@ -691,7 +692,7 @@ func handleStreamsIntegration(w http.ResponseWriter, r *http.Request, streamMgr 
 		}
 		e := streamsStreamEntry{
 			UUID: c.ID, Name: c.Name, Model: c.Model, StreamName: c.StreamName,
-			Streaming: c.Streaming, PublicationReady: c.Streaming,
+			Streaming: c.Streaming, Stopped: streamMgr.IsStopped(c.ID), PublicationReady: c.Streaming,
 			RTSPURL: c.RTSPURL, RTSPURLByID: c.RTSPURLByID, HLSURL: c.HLSURL, SnapshotURL: c.SnapshotURL,
 			Transport: transport, VideoCodec: "h264", AudioCodec: "aac",
 			PortMappings: streamPortMappings{

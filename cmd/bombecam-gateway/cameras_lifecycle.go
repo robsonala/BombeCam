@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
 	"github.com/Fever-r/BombeCam/pkg/policy"
 	"github.com/Fever-r/BombeCam/pkg/profile"
@@ -35,6 +36,38 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func handleCameraStreamToggle(w http.ResponseWriter, r *http.Request, camID string, paused bool, streamMgr *StreamManager, optPM ...profile.ProfileManager) {
+	pm := getEffectivePM(optPM...)
+	if pm == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "profile unavailable"})
+		return
+	}
+	streamMgr.lifecycleMu.Lock()
+	defer streamMgr.lifecycleMu.Unlock()
+	notFound := false
+	_, err := pm.Update(r.Context(), func(p *profile.Profile) error {
+		cam, ok := p.Cameras[camID]
+		if !ok {
+			notFound = true
+			return fmt.Errorf("camera not found")
+		}
+		cam.StreamPaused = paused
+		p.Cameras[camID] = cam
+		return nil
+	})
+	if err != nil {
+		if notFound {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "camera not found"})
+		} else {
+			logging.Errorf("[cameras] could not save stream state for %s: %v\n", camID, err)
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "could not save camera stream state"})
+		}
+		return
+	}
+	streamMgr.SetCameraPaused(camID, paused)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stream_paused": paused, "router_unchanged": true})
 }
 
 // handleCameraSearch authenticates an Osaio login and lists the cameras it can
@@ -177,13 +210,17 @@ func handleCameraAdd(w http.ResponseWriter, r *http.Request, streamMgr *StreamMa
 
 	// Build the union desired set (existing enrolled + newly requested) and a
 	// combined inventory so Enroll keeps other logins' cameras running.
+	streamMgr.lifecycleMu.Lock()
+	defer streamMgr.lifecycleMu.Unlock()
 	desired := make(map[string]bool)
+	paused := make(map[string]bool)
 	combined := make([]bridge.Device, 0, len(newDevs))
 	combined = append(combined, newDevs...)
 	if pm != nil {
 		if prof := pm.GetProfile(); prof != nil {
 			for id, cam := range prof.Cameras {
 				desired[id] = true
+				paused[id] = cam.StreamPaused
 				if _, dup := newMap[id]; !dup {
 					combined = append(combined, bridge.Device{UUID: cam.UUID, Name: cam.Name, Type: cam.Model, Model: 1, Online: 1})
 				}
@@ -198,7 +235,7 @@ func handleCameraAdd(w http.ResponseWriter, r *http.Request, streamMgr *StreamMa
 		desiredList = append(desiredList, id)
 	}
 
-	if _, err := streamMgr.Enroll(desiredList, combined); err != nil {
+	if _, err := streamMgr.enroll(desiredList, combined, paused); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 		return
 	}
@@ -255,6 +292,7 @@ func handleCameraRemove(w http.ResponseWriter, r *http.Request, camID string, st
 	}
 
 	pm := getEffectivePM(optPM...)
+	streamMgr.lifecycleMu.Lock()
 	onRouter := false
 	if pm != nil {
 		if prof := pm.GetProfile(); prof != nil {
@@ -277,6 +315,7 @@ func handleCameraRemove(w http.ResponseWriter, r *http.Request, camID string, st
 			return nil
 		})
 	}
+	streamMgr.lifecycleMu.Unlock()
 
 	note := "BombeCam did not change this camera's internet access."
 	var router *routerOutcome

@@ -144,8 +144,7 @@ func reconfigureMedia(ctx context.Context, sm *StreamManager, s profile.Integrat
 	setStreamManagerPorts(sm, s)
 	if newRTSP, _, _, _ := mediaPorts(s); newRTSP != oldRTSP {
 		// publishers hold the old RTSP address: start the camera sessions again
-		sm.StopStreaming()
-		sm.StartStreaming()
+		sm.RestartActiveStreaming()
 	}
 	kickIntegrations()
 	return nil

@@ -358,10 +358,18 @@ func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamMan
 			}
 		}
 	}
+	stm.lifecycleMu.Lock()
+	latest := pm.GetProfile()
+	if latest == nil {
+		stm.lifecycleMu.Unlock()
+		return
+	}
 	var enrolledIDs []string
 	var inventory []bridge.Device
-	for uuid, cam := range prof.Cameras {
+	paused := make(map[string]bool)
+	for uuid, cam := range latest.Cameras {
 		enrolledIDs = append(enrolledIDs, uuid)
+		paused[uuid] = cam.StreamPaused
 		if d, ok := live[uuid]; ok {
 			inventory = append(inventory, d)
 		} else {
@@ -370,14 +378,15 @@ func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamMan
 	}
 
 	if len(enrolledIDs) > 0 {
-		enrolled, err := stm.Enroll(enrolledIDs, inventory)
+		enrolled, err := stm.enroll(enrolledIDs, inventory, paused)
+		stm.lifecycleMu.Unlock()
 		if err != nil {
 			logging.Errorf("[stream] restart enrollment error: %v\n", err)
 		} else {
 			logging.Infof("[stream] restored %d enrolled camera(s) from profile: %v\n", len(enrolled), enrolled)
 			// Pre-seed known LAN IPs
 			for _, id := range enrolled {
-				if cam, ok := prof.Cameras[id]; ok && cam.IPAddress != "" {
+				if cam, ok := latest.Cameras[id]; ok && cam.IPAddress != "" {
 					if mc, found := stm.GetCamera(id); found {
 						mc.mu.Lock()
 						mc.IP = cam.IPAddress
@@ -387,6 +396,7 @@ func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamMan
 			}
 		}
 	} else {
+		stm.lifecycleMu.Unlock()
 		logging.Infoln("[stream] zero cameras enrolled in profile (awaiting enrollment via API)")
 	}
 	syncStreamNames(ctx, pm, stm)

@@ -163,6 +163,7 @@ type internalCamDisk struct {
 	EnrolledAt   time.Time          `json:"enrolled_at"`
 	LastSeenAt   time.Time          `json:"last_seen_at,omitempty"`
 	Online       bool               `json:"online"`
+	StreamPaused bool               `json:"stream_paused,omitempty"`
 	TokenCache   string             `json:"token_cache,omitempty"`
 	StreamConfig CameraStreamConfig `json:"stream_config,omitempty"`
 }
@@ -242,6 +243,7 @@ func encodeInternal(p *Profile) ([]byte, error) {
 			EnrolledAt:   c.EnrolledAt,
 			LastSeenAt:   c.LastSeenAt,
 			Online:       c.Online,
+			StreamPaused: c.StreamPaused,
 			TokenCache:   c.TokenCache.Expose(),
 			StreamConfig: c.StreamConfig,
 		}
@@ -295,6 +297,7 @@ func decodeInternal(b []byte) (*Profile, error) {
 			EnrolledAt:   c.EnrolledAt,
 			LastSeenAt:   c.LastSeenAt,
 			Online:       c.Online,
+			StreamPaused: c.StreamPaused,
 			TokenCache:   SecretString(c.TokenCache),
 			StreamConfig: c.StreamConfig,
 		}

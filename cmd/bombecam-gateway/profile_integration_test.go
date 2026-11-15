@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Fever-r/BombeCam/pkg/bridge"
 	"github.com/Fever-r/BombeCam/pkg/profile"
 )
 
@@ -172,12 +173,13 @@ func TestGateway_RestartRestoration_FromCachedToken(t *testing.T) {
 		},
 		Cameras: map[string]profile.CameraProfile{
 			"mock-uuid-001": {
-				UUID:       "mock-uuid-001",
-				Name:       "Front Yard Cam",
-				Model:      "WS03",
-				IPAddress:  "192.168.1.150",
-				EnrolledAt: time.Now().UTC(),
-				Online:     true,
+				UUID:         "mock-uuid-001",
+				Name:         "Front Yard Cam",
+				Model:        "WS03",
+				IPAddress:    "192.168.1.150",
+				EnrolledAt:   time.Now().UTC(),
+				Online:       true,
+				StreamPaused: true,
 			},
 		},
 		Connection: profile.ConnectionParameters{
@@ -200,6 +202,11 @@ func TestGateway_RestartRestoration_FromCachedToken(t *testing.T) {
 	sm.Cloud().GlobalBase = serverURL
 	stm := NewStreamManager(sm.Cloud(), "rtsp://127.0.0.1:8554", "http://127.0.0.1:8888", nil, false, "ffmpeg")
 	defer stm.CloseAll()
+	runnerStarted := make(chan struct{}, 1)
+	stm.SetRunner(func(ctx context.Context, _ *ManagedCamera, _ bridge.Device, _ int) {
+		runnerStarted <- struct{}{}
+		<-ctx.Done()
+	})
 
 	// Call restart startup with NO CLI credentials
 	runGatewayStartup(sm, stm, "", "", "", "", "", "127.0.0.1:8654")
@@ -239,6 +246,14 @@ func TestGateway_RestartRestoration_FromCachedToken(t *testing.T) {
 	}
 	if mc.IP != "192.168.1.150" {
 		t.Fatalf("expected restored IP 192.168.1.150, got %s", mc.IP)
+	}
+	if !stm.IsStopped("mock-uuid-001") {
+		t.Fatal("paused camera started during restoration")
+	}
+	select {
+	case <-runnerStarted:
+		t.Fatal("paused camera runner started during restoration")
+	default:
 	}
 }
 

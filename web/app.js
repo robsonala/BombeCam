@@ -1846,7 +1846,7 @@ async function viewerTick() {
 
     const tracker = state.frameTracker;
     const sinceFrame = performance.now() - (state.lastDecodedFrameAdvance ?? (tracker && tracker.startedAt) ?? performance.now());
-    renderStopButton(desc.stopped);
+    renderStopButton(desc.all_stopped);
     const retryBtn = document.getElementById('btn-overlay-retry');
     if (retryBtn) retryBtn.style.display = desc.state === 'locked_out' ? '' : 'none';
     if (!desc.publication_ready) {
@@ -3472,6 +3472,7 @@ function drawCamerasList() {
   rows.forEach(cam => {
     const id = cam.uuid;
     const live = camerasView.live[id] || {};
+    const stopped = cam.stream_paused || live.stopped;
     const row = document.createElement('div');
     row.className = 'item-row camera-row';
     const meta = [cam.model, multiLogin || !cam.account_email ? cam.account_email : '', live.ip || cam.ip_address]
@@ -3479,7 +3480,7 @@ function drawCamerasList() {
     row.innerHTML =
       `<div class="item-main">` +
         `<div class="item-title">${escapeHtml(cam.name || id)}` +
-          ` <span class="item-pill ${live.streaming ? 'is-ok' : ''}">${live.streaming ? 'Streaming' : 'Not streaming'}</span></div>` +
+          ` <span class="item-pill ${live.streaming ? 'is-ok' : ''}">${stopped ? 'Stopped' : (live.streaming ? 'Streaming' : 'Not streaming')}</span></div>` +
         `<div class="item-meta">${meta || escapeHtml(id)}</div>` +
       `</div>` +
       `<div class="item-field">` +
@@ -3490,6 +3491,7 @@ function drawCamerasList() {
         `</div>` +
       `</div>` +
       `<div class="item-actions">` +
+        `<button type="button" class="btn btn-secondary btn-sm" data-act="toggle-stream">${stopped ? 'Start' : 'Stop'}</button>` +
         `<button type="button" class="btn btn-secondary btn-sm" data-act="view">View</button>` +
         `<button type="button" class="btn btn-danger btn-sm" data-act="remove">Remove</button>` +
       `</div>`;
@@ -3499,9 +3501,25 @@ function drawCamerasList() {
       if (e.key === 'Enter') { e.preventDefault(); renameStream(id, input.value.trim(), cam.stream_name || ''); }
     });
     row.querySelector('[data-act="view"]').addEventListener('click', () => viewCamera(id));
+    row.querySelector('[data-act="toggle-stream"]').addEventListener('click', () => toggleCameraStream(id, cam.name || id, !stopped));
     row.querySelector('[data-act="remove"]').addEventListener('click', () => removeCamera(id, cam.name || id));
     list.appendChild(row);
   });
+}
+
+async function toggleCameraStream(id, name, stop) {
+  try {
+    const res = await apiRequest(`/api/v1/cameras/${encodeURIComponent(id)}/stream/${stop ? 'stop' : 'start'}`, 'POST');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setListStatus('cameras-status', data.error || `Could not ${stop ? 'stop' : 'start'} ${name}.`, 'error');
+      return;
+    }
+    setListStatus('cameras-status', `${name} ${stop ? 'stopped' : 'starting'}.`, 'ok');
+    await afterCameraChange();
+  } catch (_) {
+    setListStatus('cameras-status', `Could not ${stop ? 'stop' : 'start'} ${name} (BombeCam unreachable).`, 'error');
+  }
 }
 
 async function viewCamera(id) {

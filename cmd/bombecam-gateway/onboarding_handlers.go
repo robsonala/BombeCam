@@ -639,8 +639,19 @@ func handleCameraEnroll(w http.ResponseWriter, r *http.Request, sessionMgr *Sess
 		}
 	}
 
-	enrolled, err := streamMgr.Enroll(req.CameraIDs, cachedDevs)
+	streamMgr.lifecycleMu.Lock()
+	pm := getEffectivePM(optPM...)
+	paused := make(map[string]bool)
+	if pm != nil {
+		if prof := pm.GetProfile(); prof != nil {
+			for id, cam := range prof.Cameras {
+				paused[id] = cam.StreamPaused
+			}
+		}
+	}
+	enrolled, err := streamMgr.enroll(req.CameraIDs, cachedDevs, paused)
 	if err != nil {
+		streamMgr.lifecycleMu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -650,7 +661,6 @@ func handleCameraEnroll(w http.ResponseWriter, r *http.Request, sessionMgr *Sess
 	}
 
 	// Persist enrolled cameras into encrypted profile so daemon restart restores them
-	pm := getEffectivePM(optPM...)
 	if pm != nil {
 		ctx := r.Context()
 		devMap := make(map[string]bridge.Device)
@@ -690,6 +700,7 @@ func handleCameraEnroll(w http.ResponseWriter, r *http.Request, sessionMgr *Sess
 			return nil
 		})
 	}
+	streamMgr.lifecycleMu.Unlock()
 
 	if pm != nil {
 		syncStreamNames(r.Context(), pm, streamMgr)
@@ -868,7 +879,7 @@ func handleCameraStream(w http.ResponseWriter, r *http.Request, camID string, st
 	// whether MediaMTX actually has the stream, and if not, why not.
 	state, detail, ready, tracks := describeStreamState(uuid, streaming, session)
 	if streamMgr.IsStopped(uuid) {
-		state, detail, ready = "stopped", "Cameras are stopped. Press Start cameras under Settings to resume.", false
+		state, detail, ready = "stopped", "This camera is stopped. Start it on the Cameras tab.", false
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -893,6 +904,7 @@ func handleCameraStream(w http.ResponseWriter, r *http.Request, camID string, st
 		"tracks":            tracks,
 		"publisher":         streamMgr.Publisher(),
 		"stopped":           streamMgr.IsStopped(uuid),
+		"all_stopped":       streamMgr.AllStopped(),
 		"video_codec":       "h264",
 		"audio_codec":       "aac",
 		"freshness_ts":      freshness,

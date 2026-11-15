@@ -301,12 +301,15 @@ func handleAccountRemove(w http.ResponseWriter, r *http.Request, sessionMgr *Ses
 	}
 	email := profile.NormalizeEmail(req.Email)
 	pm := getEffectivePM(optPM...)
+	streamMgr.lifecycleMu.Lock()
 	if pm == nil || pm.GetProfile() == nil {
+		streamMgr.lifecycleMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found", "message": "That login isn't stored on this computer."})
 		return
 	}
 	prof := pm.GetProfile()
 	if _, ok := prof.FindAccount(email); !ok || email == "" {
+		streamMgr.lifecycleMu.Unlock()
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not_found", "message": "That login isn't stored on this computer."})
 		return
 	}
@@ -330,6 +333,7 @@ func handleAccountRemove(w http.ResponseWriter, r *http.Request, sessionMgr *Ses
 		p.RemoveAccount(email)
 		return nil
 	})
+	streamMgr.lifecycleMu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "save_failed", "message": err.Error()})
 		return

@@ -410,6 +410,11 @@ func SetupAPIMux(sessionMgr *SessionManager, streamMgr *StreamManager, optPM ...
 
 		camID := parts[0]
 
+		if len(parts) == 3 && parts[1] == "stream" && (parts[2] == "start" || parts[2] == "stop") && r.Method == http.MethodPost {
+			handleCameraStreamToggle(w, r, camID, parts[2] == "stop", streamMgr, optPM...)
+			return
+		}
+
 		// Route: DELETE /api/v1/cameras/{id}  (remove a camera from BombeCam)
 		if len(parts) == 1 && r.Method == http.MethodDelete {
 			handleCameraRemove(w, r, camID, streamMgr, optPM...)

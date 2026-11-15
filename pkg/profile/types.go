@@ -225,6 +225,7 @@ type CameraProfile struct {
 	EnrolledAt   time.Time          `json:"enrolled_at"`
 	LastSeenAt   time.Time          `json:"last_seen_at,omitempty"`
 	Online       bool               `json:"online"`
+	StreamPaused bool               `json:"stream_paused,omitempty"`
 	TokenCache   SecretString       `json:"token_cache,omitempty"`
 	StreamConfig CameraStreamConfig `json:"stream_config,omitempty"`
 }
@@ -273,6 +274,7 @@ type CameraProfileView struct {
 	MACAddress   string    `json:"mac_address,omitempty"`
 	EnrolledAt   time.Time `json:"enrolled_at"`
 	Online       bool      `json:"online"`
+	StreamPaused bool      `json:"stream_paused"`
 }
 
 // PublicCredentialsView is the sanitized view of credentials.
@@ -307,6 +309,7 @@ func (p *Profile) RedactSecrets() *PublicProfileView {
 			MACAddress:   c.MACAddress,
 			EnrolledAt:   c.EnrolledAt,
 			Online:       c.Online,
+			StreamPaused: c.StreamPaused,
 		}
 	}
 	accountsView := make([]PublicCredentialsView, 0, len(p.Accounts))
