@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	shadowshim "github.com/Fever-r/BombeCam/pkg/bridge/shadow_shim"
 )
 
@@ -194,10 +195,10 @@ func (m *MQTTControlChannel) setAttributes(ctx context.Context, uuid string, des
 			clear[k] = nil
 		}
 		_ = d.DispatchDesired(context.Background(), uuid, clear)
-		fmt.Printf("[local-control] command unconfirmed thing=%s: %v\n", uuid, err)
+		logging.Errorf("[local-control] command unconfirmed thing=%s: %v\n", uuid, err)
 		return err
 	}
-	fmt.Printf("[local-control] command confirmed thing=%s latency=%s version=%d\n", uuid, res.Duration, res.Version)
+	logging.Infof("[local-control] command confirmed thing=%s latency=%s version=%d\n", uuid, res.Duration, res.Version)
 	return nil
 }
 

@@ -16,6 +16,7 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/mediamtx"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
 	"github.com/Fever-r/BombeCam/pkg/profile"
@@ -148,7 +149,7 @@ func mqttSync(sm *StreamManager) {
 			b.status, b.detail = "connecting", "connection lost: "+err.Error()
 			b.announced, b.published = nil, nil
 			b.mu.Unlock()
-			fmt.Printf("[mqtt] connection to %s lost (%v); reconnecting\n", cfg.Host, err)
+			logging.Errorf("[mqtt] connection to %s lost (%v); reconnecting\n", cfg.Host, err)
 		})
 		opts.SetReconnectingHandler(func(_ mqtt.Client, _ *mqtt.ClientOptions) {
 			b.mu.Lock()
@@ -161,7 +162,7 @@ func mqttSync(sm *StreamManager) {
 		b.status, b.detail = "connecting", ""
 		client := b.client
 		b.mu.Unlock()
-		fmt.Printf("[mqtt] connecting to the MQTT broker at %s (Home Assistant discovery)\n", joinHostPort(cfg.Host, port))
+		logging.Infof("[mqtt] connecting to the MQTT broker at %s (Home Assistant discovery)\n", joinHostPort(cfg.Host, port))
 		tok := client.Connect()
 		go func() {
 			if tok.WaitTimeout(15*time.Second) && tok.Error() != nil {
@@ -208,7 +209,7 @@ func (b *haBridgeState) onConnect(c mqtt.Client) {
 	b.announced, b.published = map[string]string{}, map[string]string{}
 	prefix := discoveryPrefix(b.cfg)
 	b.mu.Unlock()
-	fmt.Printf("[mqtt] connected; cameras are announced to Home Assistant under %s/\n", prefix)
+	logging.Infof("[mqtt] connected; cameras are announced to Home Assistant under %s/\n", prefix)
 	c.Publish(mqttStatusTopic, 1, true, "online")
 	c.Subscribe(mqttBaseTopic+"/+/+/set", 1, func(_ mqtt.Client, m mqtt.Message) {
 		go b.handleCommand(m.Topic(), string(m.Payload()))
@@ -647,7 +648,7 @@ func (b *haBridgeState) handleCommand(topic, payload string) {
 		if json.Unmarshal([]byte(resp), &e) == nil && e.Error != "" {
 			msg = e.Error
 		}
-		fmt.Printf("[mqtt] Home Assistant %s -> %s: failed (%s)\n", entity, payload, strings.TrimSpace(msg))
+		logging.Errorf("[mqtt] Home Assistant %s -> %s: failed (%s)\n", entity, payload, strings.TrimSpace(msg))
 	}
 	// publish what the camera now reports (and correct an optimistic UI)
 	b.mu.Lock()

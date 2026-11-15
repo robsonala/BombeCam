@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/mediamtx"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
 	"github.com/Fever-r/BombeCam/pkg/profile"
@@ -460,7 +461,7 @@ func resetStoredInformation(ctx context.Context, sessionMgr *SessionManager, str
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 				if err := reconfigureMedia(ctx, streamMgr, profile.IntegrationSettings{}); err != nil {
-					fmt.Printf("[mediamtx] could not return to the default settings: %v\n", err)
+					logging.Errorf("[mediamtx] could not return to the default settings: %v\n", err)
 				}
 			}()
 		}

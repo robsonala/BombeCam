@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
 	"github.com/Fever-r/BombeCam/pkg/netstack"
 	"github.com/Fever-r/BombeCam/pkg/profile"
@@ -1153,13 +1154,13 @@ func (sm *StreamManager) defaultRunner(ctx context.Context, mc *ManagedCamera, d
 
 		if isLocked {
 			lockouts++
-			fmt.Printf("[%s] [LOCKOUT] recovery budget exhausted (3 attempts failed).\n", dev.Name)
+			logging.Errorf("[%s] [LOCKOUT] recovery budget exhausted (3 attempts failed).\n", dev.Name)
 			if session.IsStrictManual() {
-				fmt.Printf("[%s] [LOCKOUT] strict manual mode: waiting for an explicit retry from the UI / API.\n", dev.Name)
+				logging.Infof("[%s] [LOCKOUT] strict manual mode: waiting for an explicit retry from the UI / API.\n", dev.Name)
 				if err := session.WaitUnlockContext(ctx); err != nil {
 					return
 				}
-				fmt.Printf("[%s] [LOCKOUT] explicit unlock received. Resetting budget and resuming stream...\n", dev.Name)
+				logging.Infof("[%s] [LOCKOUT] explicit unlock received. Resetting budget and resuming stream...\n", dev.Name)
 			} else {
 				// Back off instead of stopping for good: a vendor-cloud hiccup or
 				// a PC waking from sleep must not leave the camera dark until
@@ -1167,16 +1168,17 @@ func (sm *StreamManager) defaultRunner(ctx context.Context, mc *ManagedCamera, d
 				// the controls, which ride this session, come back within
 				// minutes); "Retry now" skips the wait.
 				cooldown := lockoutCooldown(lockouts, sm.RetryMaxWait())
-				fmt.Printf("[%s] [LOCKOUT] retrying automatically in %v (or press Retry in the UI).\n", dev.Name, cooldown)
+				logging.Infof("[%s] [LOCKOUT] retrying automatically in %v (or press Retry in the UI).\n", dev.Name, cooldown)
 				select {
 				case <-ctx.Done():
 					return
 				case <-session.unlockCh:
-					fmt.Printf("[%s] [LOCKOUT] retry requested. Resuming stream...\n", dev.Name)
+					logging.Infof("[%s] [LOCKOUT] retry requested. Resuming stream...\n", dev.Name)
 				case <-time.After(cooldown):
 					session.Unlock()
-					<-session.unlockCh // drain the signal Unlock queued
-					fmt.Printf("[%s] [LOCKOUT] cooldown over. Resuming stream...\n", dev.Name)
+					<-session.unlockCh
+					logging. // drain the signal Unlock queued
+							Infof("[%s] [LOCKOUT] cooldown over. Resuming stream...\n", dev.Name)
 				}
 			}
 		}
@@ -1209,13 +1211,13 @@ func (sm *StreamManager) defaultRunner(ctx context.Context, mc *ManagedCamera, d
 				session.State, session.RecoveryBudget = SessionStateLockout, 0
 				session.mu.Unlock()
 				canRetry = false
-				fmt.Printf("[%s] [LOCAL TEST] stream ended; waiting for manual restart: %v\n", dev.Name, err)
+				logging.Errorf("[%s] [LOCAL TEST] stream ended; waiting for manual restart: %v\n", dev.Name, err)
 			}
 			if canRetry {
 				session.mu.Lock()
 				rem := session.RecoveryBudget
 				session.mu.Unlock()
-				fmt.Printf("[%s] stream ended: %v (budget remaining: %d/3, restarting in 3s)...\n", dev.Name, err, rem)
+				logging.Errorf("[%s] stream ended: %v (budget remaining: %d/3, restarting in 3s)...\n", dev.Name, err, rem)
 				select {
 				case <-time.After(3 * time.Second):
 				case <-ctx.Done():
@@ -1230,7 +1232,7 @@ func (sm *StreamManager) defaultRunner(ctx context.Context, mc *ManagedCamera, d
 			}
 			session.RecordSuccess()
 			lockouts = 0
-			fmt.Printf("[%s] stream session ended cleanly (restarting in 2s)...\n", dev.Name)
+			logging.Infof("[%s] stream session ended cleanly (restarting in 2s)...\n", dev.Name)
 			select {
 			case <-time.After(2 * time.Second):
 			case <-ctx.Done():
@@ -1248,7 +1250,7 @@ func (sm *StreamManager) streamOnce(ctx context.Context, mc *ManagedCamera, c *b
 
 	vc, err := c.VideoCall(dev.UUID)
 	if err != nil {
-		fmt.Printf("[%s] videocall busy/failed: %v, retrying in 3s...\n", dev.Name, err)
+		logging.Errorf("[%s] videocall busy/failed: %v, retrying in 3s...\n", dev.Name, err)
 		select {
 		case <-time.After(3 * time.Second):
 		case <-ctx.Done():
@@ -1256,7 +1258,7 @@ func (sm *StreamManager) streamOnce(ctx context.Context, mc *ManagedCamera, c *b
 		}
 		vc, err = c.VideoCall(dev.UUID)
 		if err != nil {
-			fmt.Printf("[%s] videocall retry 2 failed: %v, retrying in 5s...\n", dev.Name, err)
+			logging.Errorf("[%s] videocall retry 2 failed: %v, retrying in 5s...\n", dev.Name, err)
 			select {
 			case <-time.After(5 * time.Second):
 			case <-ctx.Done():
@@ -1328,7 +1330,7 @@ func (sm *StreamManager) streamOnce(ctx context.Context, mc *ManagedCamera, c *b
 		}
 		activeIP = ipStr
 		ipMu.Unlock()
-		fmt.Printf("[%s] camera's LAN address: %s\n", dev.Name, ipStr)
+		logging.Infof("[%s] camera's LAN address: %s\n", dev.Name, ipStr)
 		mc.mu.Lock()
 		mc.IP = ipStr
 		mc.mu.Unlock()
@@ -1409,11 +1411,11 @@ func (sm *StreamManager) streamOnce(ctx context.Context, mc *ManagedCamera, c *b
 		// lives on the router.)
 		if localControlTestActive.Load() {
 			if !severed.Swap(true) {
-				fmt.Printf("[%s] [LOCAL TEST] local media confirmed; closing BombeCam's signaling connection\n", dev.Name)
+				logging.Infof("[%s] [LOCAL TEST] local media confirmed; closing BombeCam's signaling connection\n", dev.Name)
 				_ = sig.Close()
 			}
 		} else {
-			fmt.Printf("[%s] local media confirmed; signaling stays open for controls\n", dev.Name)
+			logging.Infof("[%s] local media confirmed; signaling stays open for controls\n", dev.Name)
 		}
 	}
 

@@ -265,6 +265,7 @@ Every option can also be set with the environment variable shown.
 ```
 -http string              web page / API address (default 127.0.0.1:8654; OSAIO_HTTP)
 -headless                 don't open a browser or show a tray icon (BOMBECAM_HEADLESS)
+-verbose                  print diagnostic logs (errors are always shown)
 -startup                  started with Windows at sign-in: don't open the browser
 -ffmpeg string            FFmpeg path (default: search next to the exe, the cache folder, PATH, winget/scoop/choco; FFMPEG_PATH)
 -mediamtx-path string     MediaMTX binary (default: next to the exe, cache folder, PATH, else download; BOMBECAM_MEDIAMTX_PATH)

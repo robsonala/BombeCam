@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/version"
 	"net/http"
 	"os"
@@ -95,6 +96,6 @@ func handleAutostart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": fmt.Sprintf("could not change Start with Windows: %v", err)})
 		return
 	}
-	fmt.Printf("[startup] start with Windows: %v\n", body.Enabled)
+	logging.Infof("[startup] start with Windows: %v\n", body.Enabled)
 	writeJSON(w, http.StatusOK, autostartInfo(r))
 }

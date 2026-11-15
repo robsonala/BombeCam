@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/serverkey"
 )
 
@@ -206,7 +207,7 @@ func (c *Cloud) h2() (map[string]string, error) {
 func (c *Cloud) GetBaseURL(account string) {
 	h, err := c.h1()
 	if err != nil {
-		fmt.Println("[get-baseurl] skipped:", err)
+		logging.Infoln("[get-baseurl] skipped:", err)
 		return
 	}
 	h["BaseUrlName"] = "global"
@@ -217,7 +218,7 @@ func (c *Cloud) GetBaseURL(account string) {
 	u := baseURL + "/v2/account/get-baseurl?" + url.Values{"account": {account}, "country": {c.Country}}.Encode()
 	j, err := c.do("GET", u, h, nil)
 	if err != nil {
-		fmt.Println("[get-baseurl] skipped:", err)
+		logging.Infoln("[get-baseurl] skipped:", err)
 		return
 	}
 	if data, ok := j["data"].(map[string]any); ok {
@@ -227,7 +228,7 @@ func (c *Cloud) GetBaseURL(account string) {
 		if ws, ok := data["ws"].(string); ok && ws != "" {
 			c.WsURL = ws
 		}
-		fmt.Printf("[get-baseurl] region=%v web=%s ws=%s\n", data["region"], c.Web, c.WsURL)
+		logging.Infof("[get-baseurl] region=%v web=%s ws=%s\n", data["region"], c.Web, c.WsURL)
 	}
 }
 
@@ -281,7 +282,7 @@ func (c *Cloud) Login(account, password string) error {
 	if c.UID == "" || c.APIToken == "" {
 		return fmt.Errorf("%w: login reply had no account ID or token", ErrUpstreamMalformedData)
 	}
-	fmt.Printf("[login] OK uid=%s\n", c.UID)
+	logging.Infof("[login] OK uid=%s\n", c.UID)
 	return nil
 }
 

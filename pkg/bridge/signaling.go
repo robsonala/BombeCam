@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/gorilla/websocket"
 )
 
@@ -120,7 +121,7 @@ func connectHeader(wsURL string, h http.Header, readTimeout time.Duration) (*Sig
 	s.installPongHandler(conn)
 	go s.readLoop(conn)
 	go s.keepalive()
-	fmt.Println("[ws] connected to", wsURL)
+	logging.Infoln("[ws] connected to", wsURL)
 	return s, nil
 }
 
@@ -174,7 +175,7 @@ func (s *Signaling) readLoop(conn *websocket.Conn) {
 			if closed {
 				return
 			}
-			fmt.Println("[ws] connection lost:", err, "- reconnecting")
+			logging.Errorf("[ws] connection lost: %v - reconnecting\n", err)
 			s.reconnect()
 			return
 		}
@@ -192,7 +193,7 @@ func (s *Signaling) readLoop(conn *websocket.Conn) {
 			if strings.Contains(m.Method, "Sdp") || len(summary) > 300 {
 				summary = summary[:min(len(summary), 120)] + "..."
 			}
-			fmt.Printf("[ws recv] method=%s data=%s\n", m.Method, summary)
+			logging.Infof("[ws recv] method=%s data=%s\n", m.Method, summary)
 		}
 		s.mu.Lock()
 		s.deliverAttributesLocked(conn, m)
@@ -250,11 +251,11 @@ func (s *Signaling) reconnect() {
 				_ = old.Close()
 			}
 			s.installPongHandler(conn)
-			fmt.Println("[ws] reconnected to", s.wsURL)
+			logging.Infoln("[ws] reconnected to", s.wsURL)
 			go s.readLoop(conn)
 			return
 		}
-		fmt.Printf("[ws] reconnect failed: %v (retrying in %v, sooner if a control is sent)\n", err, delay)
+		logging.Errorf("[ws] reconnect failed: %v (retrying in %v, sooner if a control is sent)\n", err, delay)
 		s.waitRetry(delay)
 		delay *= 2
 		if delay > reconnectMaxDelay {
@@ -282,7 +283,7 @@ func (s *Signaling) waitRetry(d time.Duration) {
 	select {
 	case <-t.C:
 	case <-kick:
-		fmt.Println("[ws] control requested; retrying now")
+		logging.Infoln("[ws] control requested; retrying now")
 	}
 }
 
@@ -349,9 +350,10 @@ func (s *Signaling) sendLocked(method string, data any, id string, deadline time
 	raw, _ := json.Marshal(m)
 	_ = s.conn.SetWriteDeadline(deadline)
 	if err := s.conn.WriteMessage(websocket.TextMessage, raw); err != nil {
-		// A failed write means the socket is gone. Close it so the read loop
-		// notices now and starts reconnecting.
-		fmt.Printf("[ws] send failed: %v; reconnecting\n", err)
+		logging.
+			// A failed write means the socket is gone. Close it so the read loop
+			// notices now and starts reconnecting.
+			Errorf("[ws] send failed: %v; reconnecting\n", err)
 		s.down = true
 		_ = s.conn.Close()
 		return ErrReconnecting

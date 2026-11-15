@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/policy"
 	"github.com/Fever-r/BombeCam/pkg/profile"
 	"github.com/Fever-r/BombeCam/pkg/renderer/openwrt"
@@ -322,26 +323,27 @@ func syncRouterLocked(ctx context.Context, streamMgr *StreamManager, pm profile.
 			o.Code = "router_password_needed"
 			o.Message = "The router no longer accepts BombeCam's key (it may have been reset). Connect it again with its password."
 		}
-		fmt.Printf("[privacy] router update failed: %s (%v)\n", o.Code, err)
+		logging.Errorf("[privacy] router update failed: %s (%v)\n", o.Code, err)
 		return o
 	}
 	result, found := openwrt.ParseResult(res.Output)
 	if res.ExitCode != 0 || !found || result.Status != "ok" {
-		fmt.Printf("[privacy] router script failed (exit %d)\n", res.ExitCode)
+		logging.Errorf("[privacy] router script failed (exit %d)\n", res.ExitCode)
 		return routerOutcome{Code: "router_script_failed", Message: routerFailureMessage(res.Output), Output: res.Output}
 	}
 	if msg := routerReportMismatch(len(want), result); msg != "" {
-		// what the router says it did is not what was asked: keep the old
-		// "applied" record so the next sync tries again, and say so
-		fmt.Printf("[privacy] router %s: %s\n", ps.RouterAddress, msg)
+		logging.
+			// what the router says it did is not what was asked: keep the old
+			// "applied" record so the next sync tries again, and say so
+			Infof("[privacy] router %s: %s\n", ps.RouterAddress, msg)
 		return routerOutcome{Code: "router_state_mismatch", Message: msg, Output: res.Output, Firewall: result.Firewall}
 	}
 	recordApplied(ctx, pm, want, result, res)
-	fmt.Printf("[privacy] router %s reports: %s\n", ps.RouterAddress, routerReportSummary(result))
+	logging.Infof("[privacy] router %s reports: %s\n", ps.RouterAddress, routerReportSummary(result))
 	warnings := append(scriptWarnings(res.Output), routerReportWarnings(result)...)
 	warnings = append(warnings, routerApplyWarnings(result)...)
 	for _, w := range warnings {
-		fmt.Printf("[privacy] router %s warning: %s\n", ps.RouterAddress, w)
+		logging.Infof("[privacy] router %s warning: %s\n", ps.RouterAddress, w)
 	}
 	return routerOutcome{OK: true, Changed: true, Warnings: warnings, Output: res.Output, Firewall: result.Firewall}
 }
@@ -455,10 +457,10 @@ func checkRouter(ctx context.Context, pm profile.ProfileManager) (routerOutcome,
 	if res.ExitCode != 0 || !found || result.Status != "ok" {
 		return routerOutcome{Code: "router_script_failed", Message: routerFailureMessage(res.Output), Output: res.Output}, result
 	}
-	fmt.Printf("[privacy] router %s check: %s\n", ps.RouterAddress, routerReportSummary(result))
+	logging.Infof("[privacy] router %s check: %s\n", ps.RouterAddress, routerReportSummary(result))
 	want := len(ps.AppliedCameras)
 	if msg := routerReportMismatch(want, result); msg != "" {
-		fmt.Printf("[privacy] router %s: %s\n", ps.RouterAddress, msg)
+		logging.Infof("[privacy] router %s: %s\n", ps.RouterAddress, msg)
 		return routerOutcome{Code: "router_state_mismatch", Message: msg, Output: res.Output, Firewall: result.Firewall}, result
 	}
 	return routerOutcome{OK: true, Output: res.Output, Warnings: routerReportWarnings(result), Firewall: result.Firewall}, result
@@ -849,7 +851,7 @@ func connectRouter(ctx context.Context, streamMgr *StreamManager, pm profile.Pro
 	res, err := routerRun(ctx, passwordTarget, openwrt.RemoteCommand(openwrt.ConnectArgs(ks.AuthorizedKeys())), openwrt.Script())
 	if err != nil {
 		o := outcomeFromError(err)
-		fmt.Printf("[privacy] connecting router %s failed: %s (%v)\n", addr, o.Code, err)
+		logging.Errorf("[privacy] connecting router %s failed: %s (%v)\n", addr, o.Code, err)
 		return o, res
 	}
 	result, found := openwrt.ParseResult(res.Output)
@@ -872,7 +874,7 @@ func connectRouter(ctx context.Context, streamMgr *StreamManager, pm profile.Pro
 		p.RouterKey = profile.SecretString(ks.PEM())
 		return nil
 	})
-	fmt.Printf("[privacy] router %s connected (%s); BombeCam's key installed\n", addr, result.Firewall)
+	logging.Infof("[privacy] router %s connected (%s); BombeCam's key installed\n", addr, result.Firewall)
 	connectOutput := res.Output
 
 	o := syncRouterLocked(ctx, streamMgr, pm, true)
@@ -998,10 +1000,10 @@ func uninstallFromRouter(ctx context.Context, pm profile.ProfileManager) routerO
 		return routerOutcome{Code: "router_script_failed", Message: routerFailureMessage(res.Output), Output: res.Output}
 	}
 	if msg := routerReportMismatch(0, result); msg != "" {
-		fmt.Printf("[privacy] router %s: %s\n", ps.RouterAddress, msg)
+		logging.Infof("[privacy] router %s: %s\n", ps.RouterAddress, msg)
 		return routerOutcome{Code: "router_state_mismatch", Message: msg, Output: res.Output, Firewall: result.Firewall}
 	}
-	fmt.Printf("[privacy] BombeCam removed from router %s (%s)\n", ps.RouterAddress, routerReportSummary(result))
+	logging.Infof("[privacy] BombeCam removed from router %s (%s)\n", ps.RouterAddress, routerReportSummary(result))
 	return routerOutcome{OK: true, Changed: true, Output: res.Output, Firewall: result.Firewall}
 }
 
@@ -1131,5 +1133,5 @@ func noteMACMissing(name, ip string) {
 		return
 	}
 	macMissingSeen[ip] = true
-	fmt.Printf("[privacy] no MAC address for %s: %s is not in this PC's ARP table (the camera must stream to this PC over the same network)\n", name, ip)
+	logging.Errorf("[privacy] no MAC address for %s: %s is not in this PC's ARP table (the camera must stream to this PC over the same network)\n", name, ip)
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"io"
 	"net"
 	"net/http"
@@ -207,11 +208,11 @@ func (s *Supervisor) start(ctx context.Context) error {
 		s.isManaged = false
 		s.running = true
 		if apiReachable(fmt.Sprintf("http://127.0.0.1:%d", s.cfg.APIPort)) {
-			fmt.Printf("[mediamtx] found a running MediaMTX on port %d; using it (not managed by BombeCam)\n", s.cfg.RTSPPort)
+			logging.Infof("[mediamtx] found a running MediaMTX on port %d; using it (not managed by BombeCam)\n", s.cfg.RTSPPort)
 			s.lastErr = ""
 		} else {
 			s.lastErr = fmt.Sprintf("RTSP port %d is already used by another program (Frigate's go2rtc uses it too). Stop that program, or choose other ports on BombeCam's Frigate / Home Assistant page", s.cfg.RTSPPort)
-			fmt.Printf("[mediamtx] WARNING: %s\n", s.lastErr)
+			logging.Errorf("[mediamtx] WARNING: %s\n", s.lastErr)
 		}
 		return nil
 	}
@@ -224,7 +225,7 @@ func (s *Supervisor) start(ctx context.Context) error {
 	}
 	if busy := PortConflicts(check); len(busy) > 0 {
 		s.lastErr = fmt.Sprintf("%s already used by another program. Stop that program, or choose other ports on BombeCam's Frigate / Home Assistant page", strings.Join(busy, ", "))
-		fmt.Printf("[mediamtx] ERROR: %s\n", s.lastErr)
+		logging.Errorf("[mediamtx] ERROR: %s\n", s.lastErr)
 		return fmt.Errorf("%s", s.lastErr)
 	}
 
@@ -295,7 +296,7 @@ func (s *Supervisor) pickRTPPortsLocked() {
 	}
 	if p, ok := freeRTPPair(want, s.cfg.WebRTCICEPort); ok {
 		if p != want {
-			fmt.Printf("[mediamtx] UDP ports %d/%d are used by another program; RTSP over UDP uses %d/%d instead (nothing to change in players or NVRs)\n", want, want+1, p, p+1)
+			logging.Infof("[mediamtx] UDP ports %d/%d are used by another program; RTSP over UDP uses %d/%d instead (nothing to change in players or NVRs)\n", want, want+1, p, p+1)
 		}
 		s.cfg.RTPPort = p
 		return
@@ -477,10 +478,10 @@ func (s *Supervisor) prepareConfigLocked() (string, error) {
 			if abs, err := filepath.Abs(p); err == nil {
 				p = abs
 			}
-			fmt.Printf("[mediamtx] using custom configuration %s\n", p)
+			logging.Infof("[mediamtx] using custom configuration %s\n", p)
 			return p, nil
 		}
-		fmt.Printf("[mediamtx] configuration %s not found; using the built-in configuration\n", p)
+		logging.Infof("[mediamtx] configuration %s not found; using the built-in configuration\n", p)
 	}
 	if err := os.MkdirAll(s.cfg.CacheDir, 0o755); err != nil {
 		return "", fmt.Errorf("cannot create %s: %w", s.cfg.CacheDir, err)
@@ -539,7 +540,7 @@ func (s *Supervisor) launchLocked(ctx context.Context) error {
 	exited := make(chan struct{})
 	s.exited = exited
 	pid := cmd.Process.Pid
-	fmt.Printf("[mediamtx] started MediaMTX (PID %d, config %s, log %s)\n", pid, s.cfgPath, s.logPath)
+	logging.Infof("[mediamtx] started MediaMTX (PID %d, config %s, log %s)\n", pid, s.cfgPath, s.logPath)
 
 	var exitErr error
 	go func() {
@@ -566,7 +567,7 @@ func (s *Supervisor) launchLocked(ctx context.Context) error {
 		default:
 		}
 		if CheckPortListening(s.cfg.RTSPPort, 150*time.Millisecond) {
-			fmt.Printf("[mediamtx] ready: RTSP :%d, HLS :%d, WebRTC :%d\n", s.cfg.RTSPPort, s.cfg.HTTPPort, s.cfg.WebRTCPort)
+			logging.Infof("[mediamtx] ready: RTSP :%d, HLS :%d, WebRTC :%d\n", s.cfg.RTSPPort, s.cfg.HTTPPort, s.cfg.WebRTCPort)
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -598,8 +599,7 @@ func (s *Supervisor) onExit(cmd *exec.Cmd, exitErr error) {
 	s.restarts++
 	attempt := s.restarts
 	s.mu.Unlock()
-
-	fmt.Printf("[mediamtx] %s\n", s.lastErrSnapshot())
+	logging.Errorf("[mediamtx] %s\n", s.lastErrSnapshot())
 
 	go func() {
 		delay := time.Duration(attempt) * 2 * time.Second
@@ -621,10 +621,10 @@ func (s *Supervisor) onExit(cmd *exec.Cmd, exitErr error) {
 				s.isManaged = false
 				s.lastErr = ""
 				s.mu.Unlock()
-				fmt.Printf("[mediamtx] another MediaMTX now owns port %d; using it\n", s.cfg.RTSPPort)
+				logging.Infof("[mediamtx] another MediaMTX now owns port %d; using it\n", s.cfg.RTSPPort)
 				return
 			}
-			fmt.Printf("[mediamtx] restarting MediaMTX (attempt %d)...\n", attempt)
+			logging.Infof("[mediamtx] restarting MediaMTX (attempt %d)...\n", attempt)
 			err := s.launchLocked(context.Background())
 			if err == nil {
 				s.lastErr = ""
@@ -635,7 +635,7 @@ func (s *Supervisor) onExit(cmd *exec.Cmd, exitErr error) {
 			s.restarts++
 			attempt = s.restarts
 			s.mu.Unlock()
-			fmt.Printf("[mediamtx] restart failed: %v\n", err)
+			logging.Errorf("[mediamtx] restart failed: %v\n", err)
 			delay = time.Duration(attempt) * 2 * time.Second
 			if delay > 30*time.Second {
 				delay = 30 * time.Second
@@ -675,7 +675,7 @@ func (s *Supervisor) stopLocked() error {
 	}
 
 	if !s.isManaged {
-		fmt.Printf("[mediamtx] unmanaged instance on port %d left running\n", s.cfg.RTSPPort)
+		logging.Infof("[mediamtx] unmanaged instance on port %d left running\n", s.cfg.RTSPPort)
 		return nil
 	}
 	if err := s.killLocked(); err != nil {
@@ -716,7 +716,7 @@ func (s *Supervisor) killLocked() error {
 		select {
 		case <-exited:
 			s.cmd = nil
-			fmt.Printf("[mediamtx] stopped MediaMTX (PID %d)\n", pid)
+			logging.Infof("[mediamtx] stopped MediaMTX (PID %d)\n", pid)
 			return nil
 		case <-time.After(5 * time.Second):
 			return fmt.Errorf("MediaMTX (PID %d) exit was not confirmed: %v", pid, killErr)
@@ -841,8 +841,10 @@ func (c *lineCapture) Write(p []byte) (int, error) {
 		c.tail.add(line)
 		// "skipping track" is expected: HLS readers skip the G.711 track and
 		// WebRTC readers skip the AAC one.
-		if (isErrorLine(line) || strings.Contains(line, "WAR")) && !strings.Contains(line, "skipping track") {
-			fmt.Printf("[mediamtx] %s\n", line)
+		if isErrorLine(line) && !strings.Contains(line, "skipping track") {
+			logging.Errorf("[mediamtx] %s\n", line)
+		} else if strings.Contains(line, "WAR") && !strings.Contains(line, "skipping track") {
+			logging.Infof("[mediamtx] %s\n", line)
 		}
 	}
 	return len(p), nil

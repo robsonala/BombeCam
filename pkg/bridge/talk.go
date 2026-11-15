@@ -12,6 +12,7 @@ import (
 
 	"github.com/pion/rtp"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/winproc"
 )
 
@@ -61,7 +62,7 @@ func (v *Viewer) observeCameraAudio(payload []byte, ts uint32, marker bool, cloc
 	a.lastTS, a.lastFrames = ts, len(frames)
 	if !a.logged && a.packets >= 25 {
 		a.logged = true
-		fmt.Printf("[%s] [AUDIO] camera mic: AAC %d Hz, %d ch, RTP pt=%d clock=%d, ts step/frame=%d, frames/packet≈%.1f, marker on %d/%d packets, one packet every %d ms so far\n",
+		logging.Infof("[%s] [AUDIO] camera mic: AAC %d Hz, %d ch, RTP pt=%d clock=%d, ts step/frame=%d, frames/packet≈%.1f, marker on %d/%d packets, one packet every %d ms so far\n",
 			v.model, a.sampleRate, a.channels, a.pt, a.clock, a.tsStep, float64(a.framesSeen)/float64(a.packets), a.markers, a.packets,
 			time.Since(a.firstAt).Milliseconds()/int64(a.packets-1))
 	}
@@ -260,7 +261,7 @@ func (v *Viewer) startTalkAudio(ffmpegPath string, requireActive bool) error {
 					if msg == "" {
 						msg = err.Error()
 					}
-					fmt.Printf("[%s] [TALK] encoder for %s exited: %s\n", v.model, f.ID, msg)
+					logging.Errorf("[%s] [TALK] encoder for %s exited: %s\n", v.model, f.ID, msg)
 				}
 				// An exited encoder cannot remain an apparently running session.
 				s.once.Do(func() { close(s.stop); _ = s.stdin.Close() })
@@ -282,10 +283,10 @@ func (v *Viewer) startTalkAudio(ffmpegPath string, requireActive bool) error {
 		if f.pt >= 0 {
 			pt = f.pt
 		}
-		fmt.Printf("[%s] [TALK] sending %s: RTP pt %d (negotiated pt %d %s), ssrc %d, step %d per %d ms, track connected: %v\n",
+		logging.Infof("[%s] [TALK] sending %s: RTP pt %d (negotiated pt %d %s), ssrc %d, step %d per %d ms, track connected: %v\n",
 			v.model, f.Label, pt, npt, codec, ssrc, step, dur.Milliseconds(), bound)
 	} else {
-		fmt.Printf("[%s] [TALK] sending %s: step %d per %d ms\n", v.model, f.Label, step, dur.Milliseconds())
+		logging.Infof("[%s] [TALK] sending %s: step %d per %d ms\n", v.model, f.Label, step, dur.Milliseconds())
 	}
 
 	// Pacer: one packet per packet-duration, on the call's audio track.
@@ -300,7 +301,7 @@ func (v *Viewer) startTalkAudio(ffmpegPath string, requireActive bool) error {
 				return
 			case p := <-s.frames:
 				if skipped := skipTalkBacklog(s.frames, &p, dur); skipped > 0 {
-					fmt.Printf("[%s] [TALK] skipped %d ms of voice that arrived late (the upload from the browser paused), so Talk stays live\n",
+					logging.Infof("[%s] [TALK] skipped %d ms of voice that arrived late (the upload from the browser paused), so Talk stays live\n",
 						v.model, (time.Duration(skipped) * dur).Milliseconds())
 					first = true
 				}
@@ -335,7 +336,7 @@ func (v *Viewer) startTalkAudio(ffmpegPath string, requireActive bool) error {
 					v.skipTalkClock(time.Now(), step, dur)
 				}
 				if err := v.writeTalkPacket(f, p.payload, step, first || f.markerEach); err != nil && first {
-					fmt.Printf("[%s] [TALK] audio track write failed: %v\n", v.model, err)
+					logging.Errorf("[%s] [TALK] audio track write failed: %v\n", v.model, err)
 				}
 				first = false
 				next = next.Add(pdur)
@@ -359,7 +360,7 @@ func (v *Viewer) startTalkAudio(ffmpegPath string, requireActive bool) error {
 			case <-t.C:
 				answered, ret, f, b, r := v.TalkDiagnostics()
 				d := v.talkDelivered.Load()
-				fmt.Printf("[%s] [TALK] last 5 s: %d audio packets sent, %d accepted by the connection (total %d, %d bytes); camera RTCP about our audio: %d new (total %d); camera answered talk request: %v (ret %d)\n",
+				logging.Infof("[%s] [TALK] last 5 s: %d audio packets sent, %d accepted by the connection (total %d, %d bytes); camera RTCP about our audio: %d new (total %d); camera answered talk request: %v (ret %d)\n",
 					v.model, f-lastF, d-lastD, f, b, r-lastR, r, answered, ret)
 				lastF, lastR, lastD = f, r, d
 			}
@@ -522,6 +523,6 @@ func (v *Viewer) StopTalkAudio() {
 				}
 			}()
 		}
-		fmt.Printf("[%s] [TALK] encoder stopped\n", v.model)
+		logging.Infof("[%s] [TALK] encoder stopped\n", v.model)
 	})
 }

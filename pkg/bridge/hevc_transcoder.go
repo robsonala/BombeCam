@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/winproc"
 )
 
@@ -48,7 +49,7 @@ func buildHEVCTranscoderArgs(hasAudio bool, audioURL, rtspURL string) []string {
 
 func buildHEVCTranscoderArgsWithEncoder(hasAudio bool, audioURL, rtspURL string, encoder hevcVideoEncoder) []string {
 	args := []string{
-		"-hide_banner", "-loglevel", "warning", "-y",
+		"-hide_banner", "-loglevel", logging.ExternalLogLevel(), "-y",
 	}
 	if encoder.name == "h264_vaapi" {
 		args = append(args, "-init_hw_device", "vaapi=va:"+encoder.device, "-filter_hw_device", "va")
@@ -115,7 +116,7 @@ func detectHEVCVideoEncoder(ffmpeg string) hevcVideoEncoder {
 	encoder := hevcVideoEncoder{name: "libx264"}
 	entries, err := os.ReadDir("/dev/dri")
 	if err != nil {
-		fmt.Printf("[media] VAAPI unavailable: cannot read /dev/dri: %v\n", err)
+		logging.Infof("[media] VAAPI unavailable: cannot read /dev/dri: %v\n", err)
 	} else {
 		foundRenderDevice := false
 		for _, entry := range entries {
@@ -128,11 +129,11 @@ func detectHEVCVideoEncoder(ffmpeg string) hevcVideoEncoder {
 				encoder = hevcVideoEncoder{name: "h264_vaapi", device: device}
 				break
 			} else {
-				fmt.Printf("[media] VAAPI unavailable on %s: %v\n", device, err)
+				logging.Infof("[media] VAAPI unavailable on %s: %v\n", device, err)
 			}
 		}
 		if !foundRenderDevice {
-			fmt.Printf("[media] VAAPI unavailable: no render device found in /dev/dri\n")
+			logging.Infof("[media] VAAPI unavailable: no render device found in /dev/dri\n")
 		}
 	}
 	actual, _ := hevcEncoderCache.LoadOrStore(ffmpeg, encoder)
@@ -182,17 +183,22 @@ func startHEVCTranscoder(ffmpeg, label, rtspURL string, hasAudio bool) (*hevcTra
 	}
 	go func() {
 		err := cmd.Wait()
+		select {
+		case <-h.done:
+			err = nil
+		default:
+		}
 		h.stop()
 		if err != nil {
-			fmt.Printf("[%s] [publish] HEVC-to-H.264 transcoder exited: %v\n", label, err)
+			logging.Errorf("[%s] [publish] HEVC-to-H.264 transcoder exited: %v\n", label, err)
 		} else {
-			fmt.Printf("[%s] [publish] HEVC-to-H.264 transcoder exited\n", label)
+			logging.Infof("[%s] [publish] HEVC-to-H.264 transcoder exited\n", label)
 		}
 	}()
 	if encoder.name == "h264_vaapi" {
-		fmt.Printf("[%s] [publish] HEVC-to-H.264 transcoding using VAAPI on %s\n", label, encoder.device)
+		logging.Infof("[%s] [publish] HEVC-to-H.264 transcoding using VAAPI on %s\n", label, encoder.device)
 	} else {
-		fmt.Printf("[%s] [publish] HEVC-to-H.264 transcoding using CPU (VAAPI unavailable)\n", label)
+		logging.Infof("[%s] [publish] HEVC-to-H.264 transcoding using CPU (VAAPI unavailable)\n", label)
 	}
 	return h, nil
 }
@@ -241,7 +247,7 @@ func (h *hevcTranscoder) writeVideo() {
 			return
 		case b := <-h.videoQueue:
 			if _, err := h.video.Write(b); err != nil {
-				fmt.Printf("[%s] [publish] HEVC transcoder video input failed: %v\n", h.label, err)
+				logging.Errorf("[%s] [publish] HEVC transcoder video input failed: %v\n", h.label, err)
 				h.stop()
 				return
 			}
@@ -256,7 +262,7 @@ func (h *hevcTranscoder) writeAudio() {
 		case <-h.done:
 			return
 		default:
-			fmt.Printf("[%s] [publish] HEVC transcoder audio input failed: %v\n", h.label, err)
+			logging.Errorf("[%s] [publish] HEVC transcoder audio input failed: %v\n", h.label, err)
 			h.stop()
 			return
 		}

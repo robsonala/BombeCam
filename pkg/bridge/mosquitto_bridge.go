@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Fever-r/BombeCam/internal/logging"
 	shadowshim "github.com/Fever-r/BombeCam/pkg/bridge/shadow_shim"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"strings"
@@ -53,7 +54,7 @@ func (b *MosquittoBridge) setError(err error) {
 	b.mu.Lock()
 	b.lastError = err.Error()
 	b.mu.Unlock()
-	fmt.Printf("[local-control] %v\n", err)
+	logging.Errorf("[local-control] %v\n", err)
 }
 func (b *MosquittoBridge) Start(ctx context.Context) error {
 	b.mu.Lock()
@@ -91,7 +92,7 @@ func (b *MosquittoBridge) Start(ctx context.Context) error {
 			b.lastError = ""
 		}
 		b.mu.Unlock()
-		fmt.Println("[local-control] broker connected; waiting for camera reports")
+		logging.Infoln("[local-control] broker connected; waiting for camera reports")
 	})
 	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
 		b.mu.Lock()
@@ -149,7 +150,7 @@ func (b *MosquittoBridge) handleIncomingFromCamera(topic string, payload []byte)
 		r.Count++
 		b.reports[parts[2]] = r
 		b.mu.Unlock()
-		fmt.Printf("[local-control] report received thing=%s fields=%d count=%d\n", parts[2], len(req.State.Reported), r.Count)
+		logging.Infof("[local-control] report received thing=%s fields=%d count=%d\n", parts[2], len(req.State.Reported), r.Count)
 	} else if parts[4] == "get" {
 		_ = b.daemon.Publish(topic, payload)
 	}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"io"
 	"net/http"
 	"os"
@@ -129,17 +130,17 @@ func ResolveBinary(cfg Config) (string, error) {
 		}
 		if sum, known := PinnedSHA256(dlURL); !known {
 			downloadErr = fmt.Errorf("no official MediaMTX %s archive with a known checksum for this platform", MediaMTXVersion)
-			fmt.Printf("[mediamtx] automated download skipped: %v\n", downloadErr)
+			logging.Infof("[mediamtx] automated download skipped: %v\n", downloadErr)
 		} else {
-			fmt.Printf("[mediamtx] binary not found locally; downloading %s (SHA-256 checked)...\n", dlURL)
+			logging.Infof("[mediamtx] binary not found locally; downloading %s (SHA-256 checked)...\n", dlURL)
 			if err := DownloadAndExtract(dlURL, sum, cacheDir); err == nil {
 				if isExecutableFile(cacheTarget) {
-					fmt.Printf("[mediamtx] successfully downloaded and cached mediamtx at %s\n", cacheTarget)
+					logging.Infof("[mediamtx] successfully downloaded and cached mediamtx at %s\n", cacheTarget)
 					return cacheTarget, nil
 				}
 			} else {
 				downloadErr = err
-				fmt.Printf("[mediamtx] automated download failed: %v\n", err)
+				logging.Errorf("[mediamtx] automated download failed: %v\n", err)
 			}
 		}
 	}

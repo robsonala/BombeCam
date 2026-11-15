@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
 	"github.com/Fever-r/BombeCam/pkg/serverkey"
 )
@@ -342,5 +343,5 @@ func logDeviceSettings(d bridge.Device) {
 	for _, k := range keys {
 		parts = append(parts, fmt.Sprintf("%s=%v", k, d.Config[k]))
 	}
-	fmt.Printf("[devices] %s settings reported by Osaio: %s\n", d.Name, strings.Join(parts, ", "))
+	logging.Infof("[devices] %s settings reported by Osaio: %s\n", d.Name, strings.Join(parts, ", "))
 }

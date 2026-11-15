@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/mediamtx"
 	"github.com/Fever-r/BombeCam/pkg/profile"
 )
@@ -194,7 +195,7 @@ func syncMediaAliases(apiBase string, rtspPort int, names map[string]string) err
 			if err := mediamtx.AddConfigPath(apiBase, n, mediamtx.ProxyPathConfig(src)); err != nil {
 				errs = append(errs, err.Error())
 			} else {
-				fmt.Printf("[streams] %s is also available as rtsp://<this PC>:%d/%s\n", strings.TrimPrefix(src, fmt.Sprintf("rtsp://127.0.0.1:%d/", rtspPort)), rtspPort, n)
+				logging.Infof("[streams] %s is also available as rtsp://<this PC>:%d/%s\n", strings.TrimPrefix(src, fmt.Sprintf("rtsp://127.0.0.1:%d/", rtspPort)), rtspPort, n)
 			}
 		case !isBombeCamAlias(p):
 			errs = append(errs, fmt.Sprintf("stream name %q is already used by your MediaMTX configuration", n))
@@ -255,7 +256,7 @@ func runIntegrationLoop(ctx context.Context, sm *StreamManager) {
 			}
 			aliasErrMu.Lock()
 			if msg != "" && msg != aliasLastErr {
-				fmt.Printf("[streams] friendly stream names: %s\n", msg)
+				logging.Infof("[streams] friendly stream names: %s\n", msg)
 			}
 			aliasLastErr = msg
 			aliasErrMu.Unlock()

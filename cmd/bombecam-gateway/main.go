@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/mediamtx"
 	"github.com/Fever-r/BombeCam/pkg/auth"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
@@ -286,7 +287,7 @@ func findTargetCam(cam string) *CamSignaling {
 func startControlAPI(addr string, sessionMgr *SessionManager, streamMgr *StreamManager) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		fmt.Printf("[control] HTTP server error: %v\n", err)
+		logging.Errorf("[control] HTTP server error: %v\n", err)
 		return
 	}
 	serveControlAPI(ln, sessionMgr, streamMgr)
@@ -295,9 +296,9 @@ func startControlAPI(addr string, sessionMgr *SessionManager, streamMgr *StreamM
 func serveControlAPI(ln net.Listener, sessionMgr *SessionManager, streamMgr *StreamManager) {
 	mux := SetupAPIMux(sessionMgr, streamMgr)
 	handler := SecurityBoundaryHandler(mux)
-	fmt.Printf("[control] HTTP API listening on %s (try: GET /api/v1/onboarding/status, POST /api/v1/onboarding/setup, GET /api/v1/privacy, GET /api/v1/inventory/discover)\n", ln.Addr())
+	logging.Infof("[control] HTTP API listening on %s (try: GET /api/v1/onboarding/status, POST /api/v1/onboarding/setup, GET /api/v1/privacy, GET /api/v1/inventory/discover)\n", ln.Addr())
 	if err := http.Serve(ln, handler); err != nil {
-		fmt.Printf("[control] HTTP server error: %v\n", err)
+		logging.Errorf("[control] HTTP server error: %v\n", err)
 	}
 }
 
@@ -321,9 +322,9 @@ func openBrowser(targetURL string) {
 	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", targetURL)
 	cmd.Dir = os.TempDir()
 	if err := cmd.Start(); err != nil {
-		fmt.Printf("[ui] failed to auto-launch browser: %v (open %s manually)\n", err, targetURL)
+		logging.Errorf("[ui] failed to auto-launch browser: %v (open %s manually)\n", err, targetURL)
 	} else {
-		fmt.Printf("[ui] launched web interface in default browser: %s\n", targetURL)
+		logging.Infof("[ui] launched web interface in default browser: %s\n", targetURL)
 	}
 }
 
@@ -353,16 +354,16 @@ func claimControlPort(addr string, headless bool) net.Listener {
 	target := browserURL(addr)
 	client := &http.Client{Timeout: 2 * time.Second}
 	if resp, herr := client.Get(target + "api/v1/onboarding/status"); herr == nil && isBombeCamStatus(resp) {
-		fmt.Printf("[control] BombeCam is already running at %s; opening it and exiting this copy.\n", target)
-		fmt.Printf("[control] (Close the other BombeCam window first if you meant to restart it.)\n")
+		logging.Infof("[control] BombeCam is already running at %s; opening it and exiting this copy.\n", target)
+		logging.Infof("[control] (Close the other BombeCam window first if you meant to restart it.)\n")
 		if !headless {
 			showPage(target)
 		}
 		time.Sleep(3 * time.Second)
 		os.Exit(0)
 	}
-	fmt.Printf("[control] ERROR: cannot use %s for the web interface: %v\n", addr, err)
-	fmt.Printf("[control] Another program is using that port. Close it, or start BombeCam with -http 127.0.0.1:<other port>.\n")
+	logging.Errorf("[control] ERROR: cannot use %s for the web interface: %v\n", addr, err)
+	logging.Errorf("[control] Another program is using that port. Close it, or start BombeCam with -http 127.0.0.1:<other port>.\n")
 	if !headless {
 		fatalNotice(fmt.Sprintf("BombeCam can't start: another program is using %s, the address of BombeCam's page.\n\nClose that program and open BombeCam again.", addr))
 	}
@@ -414,10 +415,10 @@ func applyTimezoneConfig(c *bridge.Cloud, tzFlag, offsetFlag string) {
 			if offset >= -12.0 && offset <= 14.0 {
 				c.ZoneOffset = offset
 			} else {
-				fmt.Printf("[config] timezone offset %.2f out of valid range [-12, +14] (using auto-detected offset %.1f)\n", offset, c.ZoneOffset)
+				logging.Infof("[config] timezone offset %.2f out of valid range [-12, +14] (using auto-detected offset %.1f)\n", offset, c.ZoneOffset)
 			}
 		} else {
-			fmt.Printf("[config] invalid timezone offset %q: %v (using auto-detected offset %.1f)\n", rawOffset, err, c.ZoneOffset)
+			logging.Errorf("[config] invalid timezone offset %q: %v (using auto-detected offset %.1f)\n", rawOffset, err, c.ZoneOffset)
 		}
 	}
 }
@@ -463,8 +464,10 @@ func main() {
 	headlessEnv := getEnvOrDefault("BOMBECAM_HEADLESS", "false")
 	headlessFlag := flag.Bool("headless", headlessEnv == "true" || headlessEnv == "1", "Disable automatic browser launch on Windows")
 	startupFlag := flag.Bool("startup", false, "started with Windows at sign-in: don't open the browser (the tray icon opens the page)")
+	verboseFlag := flag.Bool("verbose", false, "print diagnostic logs")
 	versionFlag := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	logging.SetVerbose(*verboseFlag)
 	if *versionFlag {
 		fmt.Println("BombeCam " + version.Version)
 		return
@@ -482,7 +485,7 @@ func main() {
 
 	controlListener := claimControlPort(*httpAddr, *headlessFlag)
 	if logPath := setupGatewayLog(); logPath != "" {
-		fmt.Printf("[bombecam] v%s starting; log file: %s\n", version.Version, logPath)
+		logging.Infof("[bombecam] v%s starting; log file: %s\n", version.Version, logPath)
 	}
 
 	// The encrypted profile first: its Frigate / Home Assistant settings
@@ -535,8 +538,8 @@ func main() {
 		applyMediaSettings(&mtxCfg, integ)
 		mtxSupervisor = mediamtx.NewSupervisor(mtxCfg)
 		if err := mtxSupervisor.Start(context.Background()); err != nil {
-			fmt.Printf("[mediamtx] ERROR: the video server could not start: %v\n", err)
-			fmt.Printf("[mediamtx] live video will not work until this is fixed; details are also shown in the web UI\n")
+			logging.Errorf("[mediamtx] ERROR: the video server could not start: %v\n", err)
+			logging.Errorf("[mediamtx] live video will not work until this is fixed; details are also shown in the web UI\n")
 		}
 		setMediaRuntime(mtxSupervisor, mtxSupervisor.APIBase())
 	} else {
@@ -582,11 +585,11 @@ func main() {
 	publisher := choosePublisher(*publisherFlag, ffmpegPath)
 	switch {
 	case publisher == bridge.PublisherFFmpeg:
-		fmt.Printf("[media] publishing camera video with FFmpeg (%s) [legacy mode]\n", ffmpegPath)
+		logging.Infof("[media] publishing camera video with FFmpeg (%s) [legacy mode]\n", ffmpegPath)
 	case ffmpegPath != "":
-		fmt.Printf("[media] publishing camera video with the built-in publisher; FFmpeg (%s) adds browser audio and talkback\n", ffmpegPath)
+		logging.Infof("[media] publishing camera video with the built-in publisher; FFmpeg (%s) adds browser audio and talkback\n", ffmpegPath)
 	default:
-		fmt.Printf("[media] publishing camera video with the built-in publisher; FFmpeg not found, so browsers get sound via HLS and talkback is unavailable\n")
+		logging.Infof("[media] publishing camera video with the built-in publisher; FFmpeg not found, so browsers get sound via HLS and talkback is unavailable\n")
 	}
 	streamMgr := NewStreamManager(sessionMgr.Cloud(), effectivePublishRTSP, *hlsBase, camIPs, *strictManualFlag, ffmpegPath)
 	streamMgr.SetPublisher(publisher)
@@ -651,7 +654,7 @@ func main() {
 
 	if *controlTransport == "cloud" {
 		SetGatewayControlChannel(sigControl)
-		fmt.Printf("[control] vendor cloud signaling control channel initialized\n")
+		logging.Infof("[control] vendor cloud signaling control channel initialized\n")
 	} else if *controlTransport == "mqtt" {
 		localShimDaemon := shadowshim.NewDaemon(shadowshim.Config{DefaultTimeout: 2 * time.Second})
 		_ = localShimDaemon.Start(context.Background())
@@ -665,16 +668,15 @@ func main() {
 		mosqBridge := bridge.NewMosquittoBridge(bridgeCfg, localShimDaemon)
 		mqttControl.AttachBroker(mosqBridge)
 		if err := mosqBridge.Start(context.Background()); err != nil {
-			fmt.Printf("[local-control] startup: %v\n", err)
+			logging.Errorf("[local-control] startup: %v\n", err)
 		}
 		defer localShimDaemon.Close()
 		defer mqttControl.Close()
 		defer mosqBridge.Close()
-
-		fmt.Printf("[control] local MQTT shadow control channel initialized on port 8883 shim (broker: %s)\n", mosquittoURL)
+		logging.Infof("[control] local MQTT shadow control channel initialized on port 8883 shim (broker: %s)\n", mosquittoURL)
 	} else {
 		SetGatewayControlChannel(sigControl)
-		fmt.Printf("[control] default cloud signaling control channel initialized\n")
+		logging.Infof("[control] default cloud signaling control channel initialized\n")
 	}
 
 	// Configure camera subnets (explicit or auto-detected)
@@ -685,14 +687,14 @@ func main() {
 				if _, ipNet, err := net.ParseCIDR(s); err == nil {
 					allowedSubnets = append(allowedSubnets, ipNet)
 				} else {
-					fmt.Printf("[config] invalid camera subnet %q: %v\n", s, err)
+					logging.Errorf("[config] invalid camera subnet %q: %v\n", s, err)
 				}
 			}
 		}
 	} else {
 		if detected, err := netstack.DetectHostSubnets(); err == nil && len(detected) > 0 {
 			allowedSubnets = detected
-			fmt.Printf("[config] auto-detected %d host LAN subnet(s) for camera discovery: %v\n", len(allowedSubnets), allowedSubnets)
+			logging.Infof("[config] auto-detected %d host LAN subnet(s) for camera discovery: %v\n", len(allowedSubnets), allowedSubnets)
 		}
 	}
 	streamMgr.SetAllowedSubnets(allowedSubnets)
@@ -706,7 +708,7 @@ func main() {
 
 	// The encrypted profile manager was created above, before the HTTP API opens.
 	if pmErr != nil || pm == nil {
-		fmt.Printf("[profile] error: failed to initialize key provider: %v\n", pmErr)
+		logging.Errorf("[profile] error: failed to initialize key provider: %v\n", pmErr)
 		sessionMgr.SetStatus(SessionStatusUnavailable, fmt.Sprintf("profile key initialization failed: %v", pmErr))
 	} else {
 		SetActiveProfileManager(pm)
@@ -745,17 +747,17 @@ func main() {
 	}, func() {
 		select {
 		case <-ch:
-			fmt.Println("shutting down gateway...")
+			logging.Infoln("shutting down gateway...")
 		case <-shutdownRequested:
-			fmt.Println("shutting down gateway (Shut down pressed)...")
+			logging.Infoln("shutting down gateway (Shut down pressed)...")
 		}
 	})
 	streamMgr.CloseAll()
 	if mtxSupervisor != nil {
 		if err := mtxSupervisor.Stop(); err != nil {
-			fmt.Printf("[mediamtx] stop error: %v\n", err)
+			logging.Errorf("[mediamtx] stop error: %v\n", err)
 		}
 	}
-	fmt.Println("bye.")
+	logging.Infoln("bye.")
 	flushGatewayLog()
 }

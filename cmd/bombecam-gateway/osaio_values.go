@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/osaiovalue"
 )
 
@@ -47,11 +48,11 @@ func (v *osaioValue) load(dataDir string) *osaiovalue.Store {
 	st := s.Status()
 	switch {
 	case st.Configured:
-		fmt.Printf("[%s] using the %s from %s\n", v.log, v.kind.Noun, v.sourceName(st.Source))
+		logging.Infof("[%s] using the %s from %s\n", v.log, v.kind.Noun, v.sourceName(st.Source))
 	case st.Problem != "":
-		fmt.Printf("[%s] %s is set but unusable: %s\n", v.log, v.sourceName(st.Source), st.Problem)
+		logging.Infof("[%s] %s is set but unusable: %s\n", v.log, v.sourceName(st.Source), st.Problem)
 	default:
-		fmt.Printf("[%s] no %s configured; enter it on the web page (cloud sign-in waits until then)\n", v.log, v.kind.Name)
+		logging.Infof("[%s] no %s configured; enter it on the web page (cloud sign-in waits until then)\n", v.log, v.kind.Name)
 	}
 	v.set(s)
 	return s
@@ -149,7 +150,7 @@ func waitForOsaioValues(sm *SessionManager, resume func()) bool {
 		if _, err := store.Key(); err == nil {
 			continue
 		}
-		fmt.Printf("[session] waiting for the Osaio %s before signing in (enter it on the web page)\n", v.kind.Name)
+		logging.Infof("[session] waiting for the Osaio %s before signing in (enter it on the web page)\n", v.kind.Name)
 		sm.SetStatus(v.missing, v.message)
 		pendingStartup = resume
 		return true
@@ -170,7 +171,7 @@ func resumeAfterChange(v *osaioValue, sm *SessionManager, stm *StreamManager) {
 	}
 	pendingStartupMu.Unlock()
 	if f != nil {
-		fmt.Printf("[%s] %s changed; continuing startup\n", v.log, v.kind.Noun)
+		logging.Infof("[%s] %s changed; continuing startup\n", v.log, v.kind.Noun)
 		f()
 		return
 	}
@@ -185,9 +186,9 @@ func resumeAfterChange(v *osaioValue, sm *SessionManager, stm *StreamManager) {
 		if email == "" || password == "" {
 			continue
 		}
-		fmt.Printf("[%s] %s changed; signing in %s again\n", v.log, v.kind.Noun, email)
+		logging.Infof("[%s] %s changed; signing in %s again\n", v.log, v.kind.Noun, email)
 		if err := session.Login(email, password); err != nil {
-			fmt.Printf("[session] signing in %s after the %s change failed: %v\n", email, v.kind.Name, err)
+			logging.Errorf("[session] signing in %s after the %s change failed: %v\n", email, v.kind.Name, err)
 			continue
 		}
 		saveLoginToken(email, session.Cloud())
@@ -223,7 +224,7 @@ func (v *osaioValue) handle(w http.ResponseWriter, r *http.Request, sm *SessionM
 			v.changeFailed(w, store, err)
 			return
 		}
-		fmt.Printf("[%s] back to the %s built into this version\n", v.log, v.kind.Noun)
+		logging.Infof("[%s] back to the %s built into this version\n", v.log, v.kind.Noun)
 		osaioChanges.Add(1)
 		go guardStartup(sm, func() { resumeAfterChange(v, sm, stm) })
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, v.code: store.Status()})
@@ -239,7 +240,7 @@ func (v *osaioValue) handle(w http.ResponseWriter, r *http.Request, sm *SessionM
 		v.changeFailed(w, store, err)
 		return
 	}
-	fmt.Printf("[%s] %s changed from the web page; now using %s\n", v.log, v.kind.Noun, v.sourceName(store.Status().Source))
+	logging.Infof("[%s] %s changed from the web page; now using %s\n", v.log, v.kind.Noun, v.sourceName(store.Status().Source))
 	osaioChanges.Add(1)
 	go guardStartup(sm, func() { resumeAfterChange(v, sm, stm) })
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, v.code: store.Status()})

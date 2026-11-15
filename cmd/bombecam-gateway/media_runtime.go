@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/mediamtx"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
 )
@@ -83,7 +84,7 @@ func resolveFFmpeg(requested string) string {
 		if p, err := exec.LookPath(requested); err == nil {
 			return p
 		}
-		fmt.Printf("[media] FFmpeg not found at %q\n", requested)
+		logging.Errorf("[media] FFmpeg not found at %q\n", requested)
 		return ""
 	}
 	name := exeName("ffmpeg")
@@ -132,7 +133,7 @@ func resolveFFmpeg(requested string) string {
 func choosePublisher(mode, ffmpegPath string) string {
 	if strings.ToLower(strings.TrimSpace(mode)) == "ffmpeg" {
 		if ffmpegPath == "" {
-			fmt.Printf("[media] -publisher ffmpeg requested but FFmpeg was not found; using the built-in publisher\n")
+			logging.Errorf("[media] -publisher ffmpeg requested but FFmpeg was not found; using the built-in publisher\n")
 			return bridge.PublisherNative
 		}
 		return bridge.PublisherFFmpeg

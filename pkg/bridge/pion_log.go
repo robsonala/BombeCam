@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	applogging "github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/pion/logging"
 )
 
@@ -18,7 +19,16 @@ type pionLoggerFactory struct {
 }
 
 func newPionLoggerFactory(label string) logging.LoggerFactory {
-	return &pionLoggerFactory{base: logging.NewDefaultLoggerFactory(), label: label}
+	base := logging.NewDefaultLoggerFactory()
+	if applogging.Verbose() {
+		if base.DefaultLogLevel < logging.LogLevelInfo {
+			base.DefaultLogLevel = logging.LogLevelInfo
+		}
+	} else {
+		base.DefaultLogLevel = logging.LogLevelError
+		base.ScopeLevels = nil
+	}
+	return &pionLoggerFactory{base: base, label: label}
 }
 
 func (f *pionLoggerFactory) NewLogger(scope string) logging.LeveledLogger {
@@ -40,7 +50,7 @@ func (t *turnLogFilter) quiet(msg string) bool {
 		return false
 	}
 	t.once.Do(func() {
-		fmt.Printf("[%s] Osaio's relay server refused a permission refresh (%s). Harmless while video goes directly over your network; not logged again for this stream.\n", t.label, msg)
+		applogging.Infof("[%s] Osaio's relay server refused a permission refresh (%s). Harmless while video goes directly over your network; not logged again for this stream.\n", t.label, msg)
 	})
 	return true
 }

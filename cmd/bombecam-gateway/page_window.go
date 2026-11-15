@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"strings"
 )
 
@@ -49,7 +49,7 @@ func isBombeCamPageWindow(title, class string) bool {
 // showPage brings an open BombeCam tab to the front, or opens the page.
 func showPage(targetURL string) {
 	if focusOpenPage() {
-		fmt.Println("[ui] brought the open BombeCam page to the front")
+		logging.Infoln("[ui] brought the open BombeCam page to the front")
 		return
 	}
 	openBrowser(targetURL)

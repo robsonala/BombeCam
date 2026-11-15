@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
 	"github.com/Fever-r/BombeCam/pkg/profile"
 )
@@ -108,7 +109,7 @@ func runGatewayStartup(sm *SessionManager, stm *StreamManager, email, password, 
 		var err error
 		pm, err = profile.NewDefaultManager(profilePath, keyFlag, keyFileFlag)
 		if err != nil || pm == nil {
-			fmt.Printf("[profile] error: failed to initialize key provider: %v\n", err)
+			logging.Errorf("[profile] error: failed to initialize key provider: %v\n", err)
 			sm.SetStatus(SessionStatusUnavailable, fmt.Sprintf("profile key initialization failed: %v", err))
 			return
 		}
@@ -117,7 +118,7 @@ func runGatewayStartup(sm *SessionManager, stm *StreamManager, email, password, 
 
 	hasProfile, err := pm.HasProfile(ctx)
 	if err != nil {
-		fmt.Printf("[profile] error checking profile existence: %v\n", err)
+		logging.Errorf("[profile] error checking profile existence: %v\n", err)
 	}
 
 	resume := func() {
@@ -125,8 +126,9 @@ func runGatewayStartup(sm *SessionManager, stm *StreamManager, email, password, 
 	}
 
 	if !hasProfile {
-		// First-run mode
-		fmt.Printf("[profile] no encrypted profile found at %s (first-run mode active)\n", profilePath)
+		logging.
+			// First-run mode
+			Infof("[profile] no encrypted profile found at %s (first-run mode active)\n", profilePath)
 		if email != "" && password != "" {
 			if strings.TrimSpace(country) == "" {
 				sm.SetStatus(SessionStatusUnavailable, "OSAIO_COUNTRY is required for this account; no country was inferred")
@@ -144,27 +146,27 @@ func runGatewayStartup(sm *SessionManager, stm *StreamManager, email, password, 
 					resume()
 				}
 			}
-			fmt.Printf("[profile] bootstrapping initial encrypted profile from CLI/env credentials for %s...\n", email)
+			logging.Infof("[profile] bootstrapping initial encrypted profile from CLI/env credentials for %s...\n", email)
 			if !bootstrapProfileFromCredentials(ctx, sm, stm, pm, email, password, country, enrolledF, deviceSel) {
 				retryStartupAfterChange(gen, retry)
 			}
 		} else {
-			fmt.Printf("[profile] first-run: no credentials configured (HTTP server active on %s, awaiting onboarding API)\n", httpAddr)
+			logging.Infof("[profile] first-run: no credentials configured (HTTP server active on %s, awaiting onboarding API)\n", httpAddr)
 			sm.SetStatus(SessionStatusCredentialsMissing, "first-run: no profile configured; complete onboarding via API")
 		}
 		return
 	}
+	logging.
 
-	// Profile exists: restore gateway state across restart
-	fmt.Printf("[profile] loading encrypted profile from %s...\n", profilePath)
+		// Profile exists: restore gateway state across restart
+		Infof("[profile] loading encrypted profile from %s...\n", profilePath)
 	prof, err := pm.Load(ctx)
 	if err != nil {
-		fmt.Printf("[profile] error: failed to decrypt/load profile: %v\n", err)
+		logging.Errorf("[profile] error: failed to decrypt/load profile: %v\n", err)
 		sm.SetStatus(SessionStatusUnavailable, "profile decryption failed: invalid key or corrupted file")
 		return
 	}
-
-	fmt.Printf("[profile] successfully loaded profile (schema v%d, logins=%d, cameras=%d)\n",
+	logging.Infof("[profile] successfully loaded profile (schema v%d, logins=%d, cameras=%d)\n",
 		prof.Version, len(prof.Accounts), len(prof.Cameras))
 
 	if waitForOsaioValues(sm, resume) {
@@ -179,11 +181,11 @@ func runGatewayStartup(sm *SessionManager, stm *StreamManager, email, password, 
 // false when the login was not signed in, which a new server key or app ID
 // may fix.
 func bootstrapProfileFromCredentials(ctx context.Context, sm *SessionManager, stm *StreamManager, pm profile.ProfileManager, email, password, country, enrolledF, deviceSel string) bool {
-	fmt.Printf("[session] authenticating account %s...\n", email)
+	logging.Infof("[session] authenticating account %s...\n", email)
 	reg := sessionsFor(sm)
 	session, fail := signInToPool(ctx, reg, pm, email, password, country)
 	if fail != nil {
-		fmt.Printf("[session] login failed: %s\n", fail.Message)
+		logging.Errorf("[session] login failed: %s\n", fail.Message)
 		if session != nil {
 			return true // signed in; only saving it failed
 		}
@@ -197,16 +199,16 @@ func bootstrapProfileFromCredentials(ctx context.Context, sm *SessionManager, st
 		sm.SetStatus(status, fail.Message)
 		return false
 	}
-	fmt.Printf("[session] authenticated successfully. UID=%s\n", session.GetStatus().VendorUID)
+	logging.Infof("[session] authenticated successfully. UID=%s\n", session.GetStatus().VendorUID)
 
 	devs, _, err := session.DeviceList(true)
 	if err != nil {
-		fmt.Printf("[session] initial device discovery failed: %v\n", err)
+		logging.Errorf("[session] initial device discovery failed: %v\n", err)
 		return true
 	}
-	fmt.Printf("\n=== %d DISCOVERED CAMERAS ===\n", len(devs))
+	logging.Infof("\n=== %d DISCOVERED CAMERAS ===\n", len(devs))
 	for _, d := range devs {
-		fmt.Printf("  - %-20s | %-15s | rtsp path=/%s online=%d\n", d.Name, d.Type, d.UUID, d.Online)
+		logging.Infof("  - %-20s | %-15s | rtsp path=/%s online=%d\n", d.Name, d.Type, d.UUID, d.Online)
 	}
 
 	var initialEnroll []string
@@ -224,9 +226,9 @@ func bootstrapProfileFromCredentials(ctx context.Context, sm *SessionManager, st
 	if len(initialEnroll) > 0 {
 		enrolled, err := stm.Enroll(initialEnroll, devs)
 		if err != nil {
-			fmt.Printf("[stream] startup enrollment error: %v\n", err)
+			logging.Errorf("[stream] startup enrollment error: %v\n", err)
 		} else {
-			fmt.Printf("[stream] enrolled %d camera(s) at startup: %v\n", len(enrolled), enrolled)
+			logging.Infof("[stream] enrolled %d camera(s) at startup: %v\n", len(enrolled), enrolled)
 			for _, id := range enrolled {
 				for _, d := range devs {
 					if d.UUID == id {
@@ -266,10 +268,10 @@ func bootstrapProfileFromCredentials(ctx context.Context, sm *SessionManager, st
 		p.Connection.TimezoneOffset = cloud.ZoneOffset
 		return nil
 	}); err != nil {
-		fmt.Printf("[profile] error saving initial profile: %v\n", err)
+		logging.Errorf("[profile] error saving initial profile: %v\n", err)
 	} else {
 		syncStreamNames(ctx, pm, stm)
-		fmt.Printf("[profile] initial encrypted profile saved successfully for %s\n", email)
+		logging.Infof("[profile] initial encrypted profile saved successfully for %s\n", email)
 	}
 	return true
 }
@@ -283,7 +285,7 @@ func bootstrapProfileFromCredentials(ctx context.Context, sm *SessionManager, st
 // to re-apply here.
 func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamManager, pm profile.ProfileManager, prof *profile.Profile) {
 	if b := prof.Privacy.BlockCloudVideo; b != nil {
-		fmt.Printf("[privacy] Block cloud video was last applied as %s on router %s\n", yesNoWord(*b), prof.Privacy.RouterAddress)
+		logging.Infof("[privacy] Block cloud video was last applied as %s on router %s\n", yesNoWord(*b), prof.Privacy.RouterAddress)
 	}
 
 	// Subnets and time zone are this PC's settings. The time zone goes on
@@ -305,7 +307,7 @@ func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamMan
 
 	reg := sessionsFor(sm)
 	if len(prof.Accounts) == 0 {
-		fmt.Println("[session] no Osaio login saved; awaiting sign-in on the web page")
+		logging.Infoln("[session] no Osaio login saved; awaiting sign-in on the web page")
 		sm.SetStatus(SessionStatusCredentialsMissing, "first-run: no profile configured; complete onboarding via API")
 		return
 	}
@@ -332,7 +334,7 @@ func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamMan
 	select {
 	case <-done:
 	case <-time.After(restoreLoginWait):
-		fmt.Println("[session] some Osaio logins are still signing in; their cameras start when they are")
+		logging.Infoln("[session] some Osaio logins are still signing in; their cameras start when they are")
 	}
 
 	// The saved cameras, and only those. Live details from each camera's
@@ -348,7 +350,7 @@ func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamMan
 			continue
 		}
 		for _, msg := range missingFromAccount(prof, acct.AccountEmail, devs) {
-			fmt.Println("[cameras] " + msg)
+			logging.Infoln("[cameras] " + msg)
 		}
 		for _, d := range devs {
 			if cam, saved := prof.Cameras[d.UUID]; saved && profile.NormalizeEmail(cam.AccountEmail) == profile.NormalizeEmail(acct.AccountEmail) {
@@ -370,9 +372,9 @@ func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamMan
 	if len(enrolledIDs) > 0 {
 		enrolled, err := stm.Enroll(enrolledIDs, inventory)
 		if err != nil {
-			fmt.Printf("[stream] restart enrollment error: %v\n", err)
+			logging.Errorf("[stream] restart enrollment error: %v\n", err)
 		} else {
-			fmt.Printf("[stream] restored %d enrolled camera(s) from profile: %v\n", len(enrolled), enrolled)
+			logging.Infof("[stream] restored %d enrolled camera(s) from profile: %v\n", len(enrolled), enrolled)
 			// Pre-seed known LAN IPs
 			for _, id := range enrolled {
 				if cam, ok := prof.Cameras[id]; ok && cam.IPAddress != "" {
@@ -385,7 +387,7 @@ func restoreGatewayState(ctx context.Context, sm *SessionManager, stm *StreamMan
 			}
 		}
 	} else {
-		fmt.Println("[stream] zero cameras enrolled in profile (awaiting enrollment via API)")
+		logging.Infoln("[stream] zero cameras enrolled in profile (awaiting enrollment via API)")
 	}
 	syncStreamNames(ctx, pm, stm)
 	kickIntegrations()
@@ -419,30 +421,30 @@ func restoreLogin(ctx context.Context, reg *SessionRegistry, pm profile.ProfileM
 		c.GetBaseURL(email)
 		session.Adopt(email, acct.Country, c)
 		if _, _, err := session.DeviceList(false); err == nil {
-			fmt.Printf("[session] %s: saved sign-in still valid\n", email)
+			logging.Infof("[session] %s: saved sign-in still valid\n", email)
 			return
 		} else {
-			fmt.Printf("[session] %s: saved sign-in no longer accepted: %v\n", email, err)
+			logging.Errorf("[session] %s: saved sign-in no longer accepted: %v\n", email, err)
 		}
 	}
 	if acct.Password.IsEmpty() {
-		fmt.Printf("[session] %s: no saved password; enter it on the Osaio logins page\n", email)
+		logging.Infof("[session] %s: no saved password; enter it on the Osaio logins page\n", email)
 		session.SetStatus(SessionStatusInvalidCredentials, "No password is saved for this login. Enter it on the Osaio logins page.")
 		return
 	}
 	delay := 5 * time.Second
 	for attempt := 1; ; attempt++ {
-		fmt.Printf("[session] %s: signing in with the saved password...\n", email)
+		logging.Infof("[session] %s: signing in with the saved password...\n", email)
 		err := session.Login(email, acct.Password.Expose())
 		if err == nil {
 			break
 		}
 		st := session.GetStatus()
 		if st.Status == SessionStatusInvalidCredentials || st.Status == SessionStatusCredentialsMissing || st.Status == SessionStatusServerKeyMissing || st.Status == SessionStatusAppIDMissing {
-			fmt.Printf("[session] %s: sign-in failed: %v\n", email, err)
+			logging.Errorf("[session] %s: sign-in failed: %v\n", email, err)
 			return
 		}
-		fmt.Printf("[session] %s: Osaio not reachable (%v); retrying in %v\n", email, err, delay)
+		logging.Errorf("[session] %s: Osaio not reachable (%v); retrying in %v\n", email, err, delay)
 		session.SetStatus(SessionStatusAuthenticating, fmt.Sprintf("waiting for the vendor cloud (attempt %d): %s", attempt, st.Error))
 		select {
 		case <-time.After(delay):
@@ -456,7 +458,7 @@ func restoreLogin(ctx context.Context, reg *SessionRegistry, pm profile.ProfileM
 			return // signed in again (or removed) from the page meanwhile
 		}
 	}
-	fmt.Printf("[session] %s: signed in (UID: %s)\n", email, session.GetStatus().VendorUID)
+	logging.Infof("[session] %s: signed in (UID: %s)\n", email, session.GetStatus().VendorUID)
 	saveLoginToken(email, session.Cloud())
 }
 
@@ -502,7 +504,7 @@ func runGatewayStartupSafely(sm *SessionManager, stm *StreamManager, email, pass
 func guardStartup(sm *SessionManager, run func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("[startup] unexpected error while restoring the saved session: %v\n%s", r, debug.Stack())
+			logging.Errorf("[startup] unexpected error while restoring the saved session: %v\n%s", r, debug.Stack())
 			sm.SetStatus(SessionStatusUnavailable, fmt.Sprintf("BombeCam hit an unexpected error while starting (%v). Details are in gateway.log; sign in again to continue.", r))
 		}
 	}()

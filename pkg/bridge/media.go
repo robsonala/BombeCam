@@ -19,6 +19,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/winproc"
 	"github.com/Fever-r/BombeCam/pkg/netstack"
 )
@@ -264,7 +265,7 @@ func NewViewer(sig *Signaling, vc *VideoCall, uuid, model, callID, ffmpeg, rtspU
 				return
 			case <-ticker.C:
 				if v.IsTalkActive() && v.IdleDuration() >= 5*time.Second {
-					fmt.Printf("[%s] [TALK_WATCHDOG] Talk session idle > 5s without audio; auto-stopping\n", v.model)
+					logging.Infof("[%s] [TALK_WATCHDOG] Talk session idle > 5s without audio; auto-stopping\n", v.model)
 					_, _ = v.SetTalk(false)
 				}
 			}
@@ -272,13 +273,13 @@ func NewViewer(sig *Signaling, vc *VideoCall, uuid, model, callID, ffmpeg, rtspU
 	}()
 
 	pc.OnICEConnectionStateChange(func(st webrtc.ICEConnectionState) {
-		fmt.Printf("[%s] ice %s\n", model, st)
+		logging.Infof("[%s] ice %s\n", model, st)
 		if st == webrtc.ICEConnectionStateFailed || st == webrtc.ICEConnectionStateClosed {
 			v.Close()
 		}
 	})
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
-		fmt.Printf("[%s] pc %s\n", model, st)
+		logging.Infof("[%s] pc %s\n", model, st)
 		if st == webrtc.PeerConnectionStateConnected {
 			v.mu.Lock()
 			v.lastPacketTime = time.Now()
@@ -306,7 +307,7 @@ func NewViewer(sig *Signaling, vc *VideoCall, uuid, model, callID, ffmpeg, rtspU
 
 	pc.OnTrack(func(tr *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		mime := strings.ToLower(tr.Codec().MimeType)
-		fmt.Printf("[%s] track %s pt=%d ssrc=%d\n", model, tr.Codec().MimeType, tr.PayloadType(), tr.SSRC())
+		logging.Infof("[%s] track %s pt=%d ssrc=%d\n", model, tr.Codec().MimeType, tr.PayloadType(), tr.SSRC())
 		// The camera's sender reports carry its own clock for the track
 		// (diagnostics: how our audio and video timelines line up).
 		if sink := v.nativeSinkIfEnabled(); sink != nil && receiver != nil {
@@ -318,10 +319,10 @@ func NewViewer(sig *Signaling, vc *VideoCall, uuid, model, callID, ffmpeg, rtspU
 		}
 		if strings.Contains(mime, "audio") || strings.Contains(mime, "aac") {
 			if !v.hasAudio {
-				fmt.Printf("[%s] audio track ignored (explicit video-only configuration)\n", model)
+				logging.Infof("[%s] audio track ignored (explicit video-only configuration)\n", model)
 				return
 			}
-			fmt.Printf("[%s] audio track received\n", model)
+			logging.Infof("[%s] audio track received\n", model)
 			sink := v.nativeSinkIfEnabled()
 			go func() {
 				buf := make([]byte, 2048)
@@ -424,12 +425,12 @@ func NewViewer(sig *Signaling, vc *VideoCall, uuid, model, callID, ffmpeg, rtspU
 		sink := v.nativeSinkIfEnabled()
 		if sink == nil {
 			if err := v.startFFmpeg(); err != nil {
-				fmt.Printf("[%s] ffmpeg start error: %v\n", model, err)
+				logging.Errorf("[%s] ffmpeg start error: %v\n", model, err)
 				v.Close()
 				return
 			}
 		} else {
-			fmt.Printf("[%s] publishing natively to %s (no FFmpeg)\n", model, v.rtspURL)
+			logging.Infof("[%s] publishing natively to %s (no FFmpeg)\n", model, v.rtspURL)
 		}
 
 		startCode := []byte{0x00, 0x00, 0x00, 0x01}
@@ -438,8 +439,13 @@ func NewViewer(sig *Signaling, vc *VideoCall, uuid, model, callID, ffmpeg, rtspU
 		for {
 			n, _, err := tr.Read(buf)
 			if err != nil {
-				fmt.Printf("[%s] track ended: %v\n", model, err)
-				v.Close()
+				v.mu.Lock()
+				closed := v.closed
+				v.mu.Unlock()
+				if !closed {
+					logging.Errorf("[%s] track ended: %v\n", model, err)
+					v.Close()
+				}
 				return
 			}
 			hlen, end, ok := rtpPayloadBounds(buf, n)
@@ -485,9 +491,9 @@ func NewViewer(sig *Signaling, vc *VideoCall, uuid, model, callID, ffmpeg, rtspU
 				restart := !v.closed && v.ff == nil && time.Since(v.lastFFStart) > 3*time.Second
 				v.mu.Unlock()
 				if restart {
-					fmt.Printf("[%s] FFmpeg is not running; restarting it\n", model)
+					logging.Infof("[%s] FFmpeg is not running; restarting it\n", model)
 					if err := v.startFFmpeg(); err != nil {
-						fmt.Printf("[%s] ffmpeg restart error: %v\n", model, err)
+						logging.Errorf("[%s] ffmpeg restart error: %v\n", model, err)
 					}
 					v.mu.Lock()
 					stdin = v.ffStdin
@@ -533,7 +539,7 @@ func NewViewer(sig *Signaling, vc *VideoCall, uuid, model, callID, ffmpeg, rtspU
 				return
 			}
 			if n := v.audioRTCP.Add(int64(len(pkts))); n == int64(len(pkts)) {
-				fmt.Printf("[%s] [TALK] camera is sending RTCP about our audio stream (first: %T)\n", v.model, pkts[0])
+				logging.Infof("[%s] [TALK] camera is sending RTCP about our audio stream (first: %T)\n", v.model, pkts[0])
 			}
 		}
 	}(audioTr.Sender())
@@ -548,7 +554,7 @@ func buildFFmpegArgs(hasAudio bool, audioURL, rtspURL string) []string {
 	if hasAudio {
 		return []string{
 			"-hide_banner",
-			"-loglevel", "warning",
+			"-loglevel", logging.ExternalLogLevel(),
 			"-y",
 			"-thread_queue_size", "10240",
 			"-fflags", "+genpts",
@@ -579,7 +585,7 @@ func buildFFmpegArgs(hasAudio bool, audioURL, rtspURL string) []string {
 	}
 	return []string{
 		"-hide_banner",
-		"-loglevel", "warning",
+		"-loglevel", logging.ExternalLogLevel(),
 		"-y",
 		"-thread_queue_size", "10240",
 		"-fflags", "+genpts",
@@ -640,7 +646,7 @@ func (v *Viewer) startFFmpeg() error {
 	v.ffStdin = stdin
 	v.audioListener = audioListener
 	v.ffAudio = nil
-	fmt.Printf("[%s] FFmpeg started (hasAudio=%v), publishing to %s\n", v.model, v.hasAudio, v.rtspURL)
+	logging.Infof("[%s] FFmpeg started (hasAudio=%v), publishing to %s\n", v.model, v.hasAudio, v.rtspURL)
 
 	if v.hasAudio && audioListener != nil {
 		go v.acceptAudioConnection(audioListener)
@@ -702,9 +708,12 @@ func (v *Viewer) startFFmpeg() error {
 		}
 		v.ff = nil
 		v.ffStdin = nil
+		closed := v.closed
 		v.mu.Unlock()
 		v.audioMu.Unlock()
-		fmt.Printf("[%s] FFmpeg exited: %v\n", v.model, err)
+		if !closed {
+			logging.Errorf("[%s] FFmpeg exited unexpectedly: %v\n", v.model, err)
+		}
 	}()
 
 	return nil
@@ -722,7 +731,7 @@ func (v *Viewer) acceptAudioConnection(l net.Listener) {
 		closed := v.closed
 		v.mu.Unlock()
 		if !closed {
-			fmt.Printf("[%s] audio loopback accept failed: %v\n", v.model, err)
+			logging.Errorf("[%s] audio loopback accept failed: %v\n", v.model, err)
 		}
 		_ = l.Close()
 		return
@@ -752,8 +761,7 @@ func (v *Viewer) acceptAudioConnection(l net.Listener) {
 	silenceFrame := []byte{0xFF, 0xF1, hdrByte2, 0x40, 0x01, 0x7F, 0xFC, 0x01, 0x18, 0x20, 0x07}
 	_, _ = conn.Write(silenceFrame)
 	v.audioMu.Unlock()
-
-	fmt.Printf("[%s] FFmpeg audio downlink loopback connected on %s\n", v.model, conn.LocalAddr().String())
+	logging.Infof("[%s] FFmpeg audio downlink loopback connected on %s\n", v.model, conn.LocalAddr().String())
 }
 
 func (v *Viewer) stopFFmpeg() {
@@ -801,7 +809,7 @@ func (v *Viewer) Close() {
 			_ = v.sig.Close()
 		}
 		close(v.doneChan)
-		fmt.Printf("[%s] viewer closed cleanly\n", v.model)
+		logging.Infof("[%s] viewer closed cleanly\n", v.model)
 	})
 }
 
@@ -858,7 +866,7 @@ func (v *Viewer) Start() error {
 	}); err != nil {
 		return err
 	}
-	fmt.Printf("[%s] offer sent\n", v.model)
+	logging.Infof("[%s] offer sent\n", v.model)
 	return nil
 }
 
@@ -906,7 +914,7 @@ func (v *Viewer) noteForeignSession(sid, method string, data map[string]any) {
 	methodSeen := v.foreignSeen[key]
 	v.foreignSeen[key] = true
 	if d := foreignDetail(method, data); d != "" && (!methodSeen || strings.Contains(method, "Talk")) {
-		defer fmt.Printf("[%s] another viewer: %s: %s\n", v.model, method, d)
+		defer logging.Infof("[%s] another viewer: %s: %s\n", v.model, method, d)
 	}
 	if sameLogin {
 		v.sameLoginAt = time.Now()
@@ -915,9 +923,9 @@ func (v *Viewer) noteForeignSession(sid, method string, data map[string]any) {
 	switch {
 	case seen:
 	case sameLogin:
-		fmt.Printf("[%s] the Osaio app is watching this camera with the same Osaio login BombeCam uses; the camera may send BombeCam no video until that view closes. Give BombeCam its own Osaio login to avoid this.\n", v.model)
+		logging.Infof("[%s] the Osaio app is watching this camera with the same Osaio login BombeCam uses; the camera may send BombeCam no video until that view closes. Give BombeCam its own Osaio login to avoid this.\n", v.model)
 	default:
-		fmt.Printf("[%s] another viewer (such as the Osaio app) is connecting to the camera; its messages (%s...) are ignored here\n", v.model, method)
+		logging.Infof("[%s] another viewer (such as the Osaio app) is connecting to the camera; its messages (%s...) are ignored here\n", v.model, method)
 	}
 }
 
@@ -933,7 +941,7 @@ func (v *Viewer) OnMessage(method string, data any) {
 	if data == nil {
 		return
 	}
-	fmt.Printf("[%s] WS recv: %s\n", v.model, method)
+	logging.Infof("[%s] WS recv: %s\n", v.model, method)
 	dataMap, ok := data.(map[string]any)
 	if !ok {
 		return
@@ -951,37 +959,37 @@ func (v *Viewer) OnMessage(method string, data any) {
 		sid, _ := dataMap["SessionId"].(string)
 		ret, _ := dataMap["Ret"].(float64)
 		sdp, _ := dataMap["WebrtcSdp"].(string)
-		fmt.Printf("[%s] SdpAnswer: sid=%s (expected=%s) ret=%v sdpLen=%d state=%s\n",
+		logging.Infof("[%s] SdpAnswer: sid=%s (expected=%s) ret=%v sdpLen=%d state=%s\n",
 			v.model, sid, v.vc.SessionID, ret, len(sdp), v.pc.SignalingState().String())
 		if sid != "" && sid != v.vc.SessionID {
-			fmt.Printf("[%s] SessionId mismatch!\n", v.model)
+			logging.Errorf("[%s] SessionId mismatch!\n", v.model)
 			return
 		}
 		if v.pc.SignalingState() != webrtc.SignalingStateHaveLocalOffer {
-			fmt.Printf("[%s] State is not HaveLocalOffer (is %s)\n", v.model, v.pc.SignalingState().String())
+			logging.Errorf("[%s] State is not HaveLocalOffer (is %s)\n", v.model, v.pc.SignalingState().String())
 			return
 		}
 		if ret != 0 {
-			fmt.Printf("[%s] answer Ret=%v\n", v.model, ret)
+			logging.Errorf("[%s] answer Ret=%v\n", v.model, ret)
 			return
 		}
 		if sdp == "" {
-			fmt.Printf("[%s] sdp is empty in data: %+v\n", v.model, data)
+			logging.Errorf("[%s] sdp is empty in data: %+v\n", v.model, data)
 			return
 		}
 		real, err := decodeAnswer(sdp)
 		if err != nil {
-			fmt.Printf("[%s] decode answer err: %v\n", v.model, err)
+			logging.Errorf("[%s] decode answer err: %v\n", v.model, err)
 			return
 		}
 		if err := v.pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: real}); err != nil {
-			fmt.Printf("[%s] setRemote err: %v\n", v.model, err)
+			logging.Errorf("[%s] setRemote err: %v\n", v.model, err)
 			return
 		}
-		fmt.Printf("[%s] answer OK; camera audio section: %s\n", v.model, compactAudioSummary(sdp))
+		logging.Infof("[%s] answer OK; camera audio section: %s\n", v.model, compactAudioSummary(sdp))
 		for _, cand := range v.pendingICE {
 			if err := v.pc.AddICECandidate(cand); err != nil {
-				fmt.Printf("[%s] drained ice err: %v\n", v.model, err)
+				logging.Errorf("[%s] drained ice err: %v\n", v.model, err)
 			}
 		}
 		v.pendingICE = nil
@@ -994,7 +1002,7 @@ func (v *Viewer) OnMessage(method string, data any) {
 
 		parsedCand, err := netstack.ParseCandidate(cand)
 		if err != nil {
-			fmt.Printf("[%s] ignoring malformed candidate: %v (raw: %q)\n", v.model, err, cand)
+			logging.Infof("[%s] ignoring malformed candidate: %v (raw: %q)\n", v.model, err, cand)
 			return
 		}
 
@@ -1015,7 +1023,7 @@ func (v *Viewer) OnMessage(method string, data any) {
 			return
 		}
 		if err := v.pc.AddICECandidate(cInit); err != nil {
-			fmt.Printf("[%s] ice add err: %v\n", v.model, err)
+			logging.Errorf("[%s] ice add err: %v\n", v.model, err)
 		}
 	case strings.Contains(method, "TalkResp") || strings.Contains(method, "Talk"):
 		ret := 0
@@ -1034,7 +1042,7 @@ func (v *Viewer) OnMessage(method string, data any) {
 				ret = int(r)
 			}
 		}
-		fmt.Printf("[%s] [TALK] camera answered: method=%s ret=%d data=%v\n", v.model, method, ret, dataMap)
+		logging.Infof("[%s] [TALK] camera answered: method=%s ret=%d data=%v\n", v.model, method, ret, dataMap)
 		v.talkMu.Lock()
 		if v.talkWaitCh != nil {
 			select {
@@ -1147,7 +1155,7 @@ func (v *Viewer) reportMediaPath() {
 					"internet": "direct over the internet (not on your LAN)",
 					"relay":    "RELAYED through the vendor's TURN server (not local)",
 				}[kind]
-				fmt.Printf("[%s] media path: %s, camera at %s\n", v.model, desc, remote)
+				logging.Infof("[%s] media path: %s, camera at %s\n", v.model, desc, remote)
 				if cb := v.OnMediaPath; cb != nil {
 					cb(kind, remote)
 				}
@@ -1267,7 +1275,7 @@ func (v *Viewer) SetTalk(enable bool) (int, error) {
 		v.lastAudioUp = time.Now()
 		v.talkAnswered, v.talkRet = true, 0
 		v.talkMu.Unlock()
-		fmt.Printf("[%s] [TALK] local camera report confirmed enable=%v\n", v.model, enable)
+		logging.Infof("[%s] [TALK] local camera report confirmed enable=%v\n", v.model, enable)
 		return 0, nil
 	}
 
@@ -1291,13 +1299,12 @@ func (v *Viewer) SetTalk(enable bool) (int, error) {
 		v.talkMu.Lock()
 		v.talkWaitCh = waitCh
 		v.talkMu.Unlock()
-
-		fmt.Printf("[%s] [TALK] dispatching service.Talk enable=%v call_id=%s\n", v.model, enable, v.callID)
+		logging.Infof("[%s] [TALK] dispatching service.Talk enable=%v call_id=%s\n", v.model, enable, v.callID)
 		if err := v.sig.send("service.Talk", payload); err != nil {
 			v.talkMu.Lock()
 			v.talkWaitCh = nil
 			v.talkMu.Unlock()
-			fmt.Printf("[%s] [TALK] send service.Talk warning: %v\n", v.model, err)
+			logging.Errorf("[%s] [TALK] send service.Talk warning: %v\n", v.model, err)
 			return -1, fmt.Errorf("send talk command: %w", err)
 		} else {
 			select {
@@ -1321,7 +1328,7 @@ func (v *Viewer) SetTalk(enable bool) (int, error) {
 					v.talkAnswered, v.talkRet = false, 0
 				}
 				v.talkMu.Unlock()
-				fmt.Printf("[%s] [TALK] command sent without a camera acknowledgement\n", v.model)
+				logging.Infof("[%s] [TALK] command sent without a camera acknowledgement\n", v.model)
 				return 0, nil
 			case <-v.doneChan:
 				v.talkMu.Lock()

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/internal/ui"
 	"github.com/Fever-r/BombeCam/pkg/auth"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
@@ -703,7 +704,7 @@ func SetupAPIMux(sessionMgr *SessionManager, streamMgr *StreamManager, optPM ...
 		if !ok {
 			return
 		}
-		fmt.Printf("[%s] [PTZ] dispatching direction=%d (dur=%dms)...\n", targetName, dir, dur)
+		logging.Infof("[%s] [PTZ] dispatching direction=%d (dur=%dms)...\n", targetName, dir, dur)
 		if err := cc.MovePTZ(r.Context(), targetUUID, dir, dur); err != nil {
 			http.Error(w, fmt.Sprintf("failed to send: %v", err), 500)
 			return
@@ -744,8 +745,7 @@ func SetupAPIMux(sessionMgr *SessionManager, streamMgr *StreamManager, optPM ...
 			return
 		}
 		normMode := bridge.IRModeName(irMode)
-
-		fmt.Printf("[%s] [IR] dispatching mode=%d\n", targetName, irMode)
+		logging.Infof("[%s] [IR] dispatching mode=%d\n", targetName, irMode)
 		if err := cc.SetIR(r.Context(), targetUUID, irMode); err != nil {
 			http.Error(w, fmt.Sprintf("failed to send: %v", err), 500)
 			return
@@ -833,8 +833,7 @@ func SetupAPIMux(sessionMgr *SessionManager, streamMgr *StreamManager, optPM ...
 			http.Error(w, "invalid mode: use on/1/true or off/0/false", 400)
 			return
 		}
-
-		fmt.Printf("[%s] [LED] dispatching on=%v\n", targetName, ledVal == 1)
+		logging.Infof("[%s] [LED] dispatching on=%v\n", targetName, ledVal == 1)
 		if err := cc.SetLED(r.Context(), targetUUID, ledVal == 1); err != nil {
 			http.Error(w, fmt.Sprintf("failed to send: %v", err), 500)
 			return
@@ -921,8 +920,7 @@ func SetupAPIMux(sessionMgr *SessionManager, streamMgr *StreamManager, optPM ...
 			http.Error(w, "invalid mode: use on/1/true or off/0/false", 400)
 			return
 		}
-
-		fmt.Printf("[%s] [LIGHT] dispatching on=%v\n", targetName, lightVal == 1)
+		logging.Infof("[%s] [LIGHT] dispatching on=%v\n", targetName, lightVal == 1)
 		if err := cc.SetLight(r.Context(), targetUUID, lightVal == 1); err != nil {
 			http.Error(w, fmt.Sprintf("failed to send: %v", err), 500)
 			return
@@ -966,8 +964,7 @@ func SetupAPIMux(sessionMgr *SessionManager, streamMgr *StreamManager, optPM ...
 		if enableStr == "0" || enableStr == "false" || enableStr == "off" {
 			enable = 0
 		}
-
-		fmt.Printf("[%s] [MIC] dispatching AudioRecordSw=%d\n", target.dev.Name, enable)
+		logging.Infof("[%s] [MIC] dispatching AudioRecordSw=%d\n", target.dev.Name, enable)
 		if err := cc.SetAttribute(r.Context(), target.dev.UUID, "AudioRecordSw", enable); err != nil {
 			http.Error(w, fmt.Sprintf("failed to send: %v", err), 500)
 			return
@@ -1026,8 +1023,7 @@ func SetupAPIMux(sessionMgr *SessionManager, streamMgr *StreamManager, optPM ...
 		} else {
 			payload = map[string]any{}
 		}
-
-		fmt.Printf("[%s] [CMD] dispatching method=%s data=%+v\n", target.dev.Name, method, payload)
+		logging.Infof("[%s] [CMD] dispatching method=%s data=%+v\n", target.dev.Name, method, payload)
 		if isLocalControl(GatewayControlChannel()) {
 			http.Error(w, "raw vendor commands are disabled during local control testing", http.StatusConflict)
 			return
@@ -1467,7 +1463,7 @@ func handleCameraControl(w http.ResponseWriter, r *http.Request, camID string, s
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid value: use on or off"})
 			return
 		}
-		fmt.Printf("[%s] [SETTINGS] dispatching %s=%d\n", mc.Name, key, val)
+		logging.Infof("[%s] [SETTINGS] dispatching %s=%d\n", mc.Name, key, val)
 		if sendErr := cc.SetAttribute(r.Context(), camID, key, val); sendErr != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)

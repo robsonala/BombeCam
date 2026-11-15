@@ -15,6 +15,7 @@ import (
 
 	"rsc.io/qr"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/auth"
 	"github.com/Fever-r/BombeCam/pkg/profile"
 )
@@ -253,7 +254,7 @@ func handleAdminSetup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "admin_exists", "message": "BombeCam already has an administrator. Sign in instead."})
 		return
 	}
-	fmt.Printf("[admin] administrator %q created (sign-in on this PC: %v)\n", req.Name, req.RequireLocalSignIn != nil && *req.RequireLocalSignIn)
+	logging.Infof("[admin] administrator %q created (sign-in on this PC: %v)\n", req.Name, req.RequireLocalSignIn != nil && *req.RequireLocalSignIn)
 	csrf, ok := startAdminSession(w, r)
 	if !ok {
 		return
@@ -557,7 +558,7 @@ func handleAdminTwoStepConfirm(w http.ResponseWriter, r *http.Request) {
 	pendingTOTP.Lock()
 	pendingTOTP.secret = ""
 	pendingTOTP.Unlock()
-	fmt.Println("[admin] two-step sign-in turned on")
+	logging.Infoln("[admin] two-step sign-in turned on")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "recovery_codes": codes})
 }
 
@@ -593,7 +594,7 @@ func handleAdminTwoStepDisable(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "save_failed", "message": err.Error()})
 		return
 	}
-	fmt.Println("[admin] two-step sign-in turned off")
+	logging.Infoln("[admin] two-step sign-in turned off")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -652,7 +653,7 @@ func ensureAdminFromEnv(pm profile.ProfileManager, getenv func(string) string) {
 	}
 	hash, err := auth.HashPassword(password)
 	if err != nil {
-		fmt.Printf("[admin] BOMBECAM_ADMIN_PASSWORD not used: %v\n", err)
+		logging.Errorf("[admin] BOMBECAM_ADMIN_PASSWORD not used: %v\n", err)
 		return
 	}
 	id := make([]byte, 8)
@@ -664,10 +665,10 @@ func ensureAdminFromEnv(pm profile.ProfileManager, getenv func(string) string) {
 		}
 		return nil
 	}); err != nil {
-		fmt.Printf("[admin] could not create the administrator from the environment: %v\n", err)
+		logging.Errorf("[admin] could not create the administrator from the environment: %v\n", err)
 		return
 	}
-	fmt.Printf("[admin] administrator %q created from BOMBECAM_ADMIN_PASSWORD\n", name)
+	logging.Infof("[admin] administrator %q created from BOMBECAM_ADMIN_PASSWORD\n", name)
 }
 
 // startOverShutdown shuts BombeCam down after starting over (replaced in tests).
@@ -696,7 +697,7 @@ func handleAdminStartOver(w http.ResponseWriter, r *http.Request, sessionMgr *Se
 		om.RevokeOperatorSessions()
 		om.ClearSessionCookie(w)
 	}
-	fmt.Println("[admin] started over after a forgotten password: all saved data deleted; shutting down")
+	logging.Infoln("[admin] started over after a forgotten password: all saved data deleted; shutting down")
 	resp["status"] = "shutting_down"
 	writeJSON(w, http.StatusOK, resp)
 	go startOverShutdown()

@@ -11,6 +11,7 @@ import (
 	"unsafe"
 
 	"fyne.io/systray"
+	"github.com/Fever-r/BombeCam/internal/logging"
 )
 
 // BombeCam runs without a console window on Windows (the bombecam.exe
@@ -76,9 +77,9 @@ func trayReady(t trayConfig) {
 			case <-mStart.ClickedCh:
 				on := !mStart.Checked()
 				if err := setAutostart(on); err != nil {
-					fmt.Printf("[startup] could not change Start with Windows: %v\n", err)
+					logging.Errorf("[startup] could not change Start with Windows: %v\n", err)
 				} else {
-					fmt.Printf("[startup] start with Windows: %v\n", on)
+					logging.Infof("[startup] start with Windows: %v\n", on)
 				}
 				updateTip()
 			case <-mLog.ClickedCh:

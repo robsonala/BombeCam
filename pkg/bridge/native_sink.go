@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"math"
 	"sync"
 	"time"
@@ -294,11 +295,11 @@ func (s *nativeSink) OnVideoPacket(payload []byte, ts uint32, marker bool) {
 			s.vpub = nil
 		}
 		s.vpubSawIDR = false
-		fmt.Printf("[%s] [publish] detected native HEVC NAL units; publishing HEVC to MediaMTX\n", s.label)
+		logging.Infof("[%s] [publish] detected native HEVC NAL units; publishing HEVC to MediaMTX\n", s.label)
 		if s.transcoderPath != "" {
 			transcoder, err := startHEVCTranscoder(s.transcoderPath, s.label, s.rtspURL, s.wantAudio)
 			if err != nil {
-				fmt.Printf("[%s] [publish] HEVC transcoder unavailable; falling back to native HEVC: %v\n", s.label, err)
+				logging.Errorf("[%s] [publish] HEVC transcoder unavailable; falling back to native HEVC: %v\n", s.label, err)
 			} else {
 				s.hevcTranscoder = transcoder
 			}
@@ -403,7 +404,7 @@ func (s *nativeSink) flushAULocked() {
 	}
 	if s.hevcTranscoder != nil {
 		if err := s.hevcTranscoder.WriteVideo(nals); err != nil {
-			fmt.Printf("[%s] [publish] HEVC transcode input failed: %v\n", s.label, err)
+			logging.Errorf("[%s] [publish] HEVC transcode input failed: %v\n", s.label, err)
 		}
 		return
 	}
@@ -431,7 +432,7 @@ func (s *nativeSink) noteSPSLocked(nal []byte) error {
 	if info.FPS > 0 {
 		extra = fmt.Sprintf(", %.3g fps declared", info.FPS)
 	}
-	fmt.Printf("[%s] [publish] video: H.264 %s %s, %dx%d, POC type %d%s\n",
+	logging.Infof("[%s] [publish] video: H.264 %s %s, %dx%d, POC type %d%s\n",
 		s.label, info.profileName(), info.levelName(), info.Width, info.Height, info.POCType, extra)
 	return nil
 }
@@ -442,7 +443,7 @@ func (s *nativeSink) logVideoDiagnosticsLocked(now time.Time) {
 	if !s.videoDiag.windowReady(now) {
 		return
 	}
-	fmt.Printf("[%s] [publish-debug] video input: %s; codec=%s SPS=%v PPS=%v VPS=%v IDR access units=%d publisher=%v\n",
+	logging.Infof("[%s] [publish-debug] video input: %s; codec=%s SPS=%v PPS=%v VPS=%v IDR access units=%d publisher=%v\n",
 		s.label, s.videoDiag.summary(), s.videoCodecName(), s.sps != nil, s.pps != nil, s.vps != nil, s.videoDiag.idrAccessUnits, s.pub != nil || s.hevcTranscoder != nil)
 	s.videoDiag.resetWindow(now)
 }
@@ -505,7 +506,7 @@ func (s *nativeSink) writeVideoLocked(nals [][]byte, idr bool, ts uint32) {
 		err = s.pub.WriteH264(nals, ts)
 	}
 	if err != nil {
-		fmt.Printf("[%s] [publish] RTSP write failed (%v); reconnecting\n", s.label, err)
+		logging.Errorf("[%s] [publish] RTSP write failed (%v); reconnecting\n", s.label, err)
 		s.setPubLocked(nil)
 		return
 	}
@@ -536,7 +537,7 @@ func (s *nativeSink) guardLocked(track int, ts uint32) uint32 {
 	}
 	if held > 0 && !s.guardNote[track] {
 		s.guardNote[track] = true
-		fmt.Printf("[%s] [publish] %s timestamp stepped back %d ticks; held so the stream stays monotonic\n",
+		logging.Infof("[%s] [publish] %s timestamp stepped back %d ticks; held so the stream stays monotonic\n",
 			s.label, [...]string{"video", "AAC", "G.711"}[track], held)
 	}
 	return out
@@ -552,7 +553,7 @@ func (s *nativeSink) ensurePublisherLocked() bool {
 	if s.pub != nil {
 		select {
 		case <-s.pub.Done():
-			fmt.Printf("[%s] [publish] MediaMTX closed the publication; reconnecting\n", s.label)
+			logging.Infof("[%s] [publish] MediaMTX closed the publication; reconnecting\n", s.label)
 			s.setPubLocked(nil)
 		default:
 			return true
@@ -586,7 +587,7 @@ func (s *nativeSink) ensurePublisherLocked() bool {
 	if err != nil {
 		msg := err.Error()
 		if msg != s.dialErr {
-			fmt.Printf("[%s] [publish] cannot publish to %s: %v (will keep retrying)\n", s.label, s.rtspURL, err)
+			logging.Errorf("[%s] [publish] cannot publish to %s: %v (will keep retrying)\n", s.label, s.rtspURL, err)
 		}
 		s.dialErr = msg
 		return false
@@ -619,7 +620,7 @@ func (s *nativeSink) ensurePublisherLocked() bool {
 			go s.runScheduler()
 		}
 	}
-	fmt.Printf("[%s] [publish] publishing to %s (native, audio=%v, browser audio=%v)\n", s.label, s.rtspURL, audio != nil, s.g711 != nil)
+	logging.Infof("[%s] [publish] publishing to %s (native, audio=%v, browser audio=%v)\n", s.label, s.rtspURL, audio != nil, s.g711 != nil)
 	return true
 }
 
@@ -717,7 +718,7 @@ func (s *nativeSink) onAudio(payload []byte, rtpTS uint32, haveRTP bool) {
 	}
 	if s.hevcTranscoder != nil {
 		if err := s.hevcTranscoder.WriteAudio(payload); err != nil {
-			fmt.Printf("[%s] [publish] HEVC transcode audio input failed: %v\n", s.label, err)
+			logging.Errorf("[%s] [publish] HEVC transcode audio input failed: %v\n", s.label, err)
 		}
 		return
 	}
@@ -743,7 +744,7 @@ func (s *nativeSink) onAudio(payload []byte, rtpTS uint32, haveRTP bool) {
 	if s.pub == nil || !s.pub.hasAudio {
 		if s.pub != nil && !s.loggedNoAudio {
 			s.loggedNoAudio = true
-			fmt.Printf("[%s] [publish] audio started after the stream was announced; audio will join on the next reconnect\n", s.label)
+			logging.Infof("[%s] [publish] audio started after the stream was announced; audio will join on the next reconnect\n", s.label)
 		}
 		return
 	}
@@ -820,7 +821,7 @@ func (s *nativeSink) startG711Locked() {
 	gen := s.g711Gen
 	t, err := startG711Transcoder(s.transcoderPath, rate, s.aFrameSamplesLocked(), func(b []byte, ts int64) { s.emitG711Gen(gen, b, ts) })
 	if err != nil {
-		fmt.Printf("[%s] [publish] browser audio track unavailable: %v\n", s.label, err)
+		logging.Errorf("[%s] [publish] browser audio track unavailable: %v\n", s.label, err)
 		return
 	}
 	s.g711 = t
@@ -899,7 +900,7 @@ func (s *nativeSink) measureAudioCadenceLocked(ts uint32, haveRTP bool, now time
 	}
 	if (s.aFrameSamples == 0 && s.aMeasVotes >= 1) || s.aMeasVotes >= 2 {
 		if s.aFrameSamples != cand {
-			fmt.Printf("[%s] [publish] audio: each camera frame covers %d samples (%d ms) of real time\n",
+			logging.Infof("[%s] [publish] audio: each camera frame covers %d samples (%d ms) of real time\n",
 				s.label, cand, int64(cand)*1000/int64(s.audioCfg.SampleRate))
 		}
 		s.aFrameSamples = cand
@@ -985,7 +986,7 @@ func (s *nativeSink) maybeLogTimingLocked(now time.Time) {
 		line += "; video-only viewer copy on"
 	}
 	line += s.srSummaryLocked()
-	fmt.Println(line)
+	logging.Infoln(line)
 	s.stAt = now
 	s.stHaveA, s.stHaveV, s.stHG = false, false, false
 	s.stGrowAge = 0
@@ -1105,7 +1106,7 @@ func (s *nativeSink) enqueueLocked(track int, it sinkItem, capture time.Time) {
 				s.delay = nd
 				s.decayTarget = 0
 				s.stGrowTrack, s.stGrowAge = track, age
-				fmt.Printf("[%s] [publish] audio/video alignment delay now %d ms (%s arrived %d ms after capture for over a second)\n", s.label, s.delay.Milliseconds(), trackName(track), age.Milliseconds())
+				logging.Infof("[%s] [publish] audio/video alignment delay now %d ms (%s arrived %d ms after capture for over a second)\n", s.label, s.delay.Milliseconds(), trackName(track), age.Milliseconds())
 			}
 			s.lateSince[track] = time.Time{}
 		}
@@ -1150,7 +1151,7 @@ func (s *nativeSink) decayDelayLocked(now time.Time, age time.Duration) {
 			nd := s.delay - step
 			if nd <= s.decayTarget {
 				nd = s.decayTarget
-				fmt.Printf("[%s] [publish] audio/video alignment delay now %d ms (tracks on time)\n", s.label, nd.Milliseconds())
+				logging.Infof("[%s] [publish] audio/video alignment delay now %d ms (tracks on time)\n", s.label, nd.Milliseconds())
 			}
 			s.delay = nd
 		}
@@ -1313,7 +1314,7 @@ func (s *nativeSink) dialViewerCopyLocked() {
 		if err != nil {
 			if msg := err.Error(); msg != s.vpubErr {
 				s.vpubErr = msg
-				fmt.Printf("[%s] [publish] video-only viewer copy unavailable: %v\n", s.label, err)
+				logging.Errorf("[%s] [publish] video-only viewer copy unavailable: %v\n", s.label, err)
 			}
 			return
 		}
@@ -1324,7 +1325,7 @@ func (s *nativeSink) dialViewerCopyLocked() {
 		s.vpubErr = ""
 		s.vpub, s.vpubSawIDR = pub, false
 		s.vpubGuard.reset()
-		fmt.Printf("[%s] [publish] video-only viewer copy at %s (no alignment delay)\n", s.label, url)
+		logging.Infof("[%s] [publish] video-only viewer copy at %s (no alignment delay)\n", s.label, url)
 	}()
 }
 
@@ -1357,7 +1358,7 @@ func (s *nativeSink) OnSenderReport(track int, ntp uint64, rtpTS uint32, clock u
 	t := ntpToTime(ntp)
 	if !r.have {
 		r.first = senderReportPoint{ntp: t, rtp: rtpTS}
-		fmt.Printf("[%s] [publish] the camera sends sender reports for its %s (its own clock)\n", s.label, [...]string{"video", "audio"}[track])
+		logging.Infof("[%s] [publish] the camera sends sender reports for its %s (its own clock)\n", s.label, [...]string{"video", "audio"}[track])
 	}
 	r.have, r.ntp, r.rtp, r.clock = true, t, rtpTS, clock
 	r.count++

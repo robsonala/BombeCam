@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/bridge"
 	"github.com/Fever-r/BombeCam/pkg/profile"
 )
@@ -38,7 +38,7 @@ func renewCloudLogin(old *bridge.Cloud) *bridge.Cloud {
 	}
 	password := savedPassword(email)
 	if password == "" {
-		fmt.Printf("[session] the Osaio sign-in for %s seems to have expired; no saved password to sign in again (sign in on the page)\n", email)
+		logging.Errorf("[session] the Osaio sign-in for %s seems to have expired; no saved password to sign in again (sign in on the page)\n", email)
 		return nil
 	}
 	renewMu.Lock()
@@ -48,12 +48,11 @@ func renewCloudLogin(old *bridge.Cloud) *bridge.Cloud {
 	}
 	renewLast[email] = time.Now()
 	renewMu.Unlock()
-
-	fmt.Printf("[session] the Osaio sign-in for %s seems to have expired; signing in again with the saved login\n", email)
+	logging.Infof("[session] the Osaio sign-in for %s seems to have expired; signing in again with the saved login\n", email)
 	nc := old.Clone()
 	nc.GetBaseURL(email)
 	if err := nc.Login(email, password); err != nil {
-		fmt.Printf("[session] signing in again failed: %v\n", err)
+		logging.Errorf("[session] signing in again failed: %v\n", err)
 		return nil
 	}
 	renewMu.Lock()
@@ -61,7 +60,7 @@ func renewCloudLogin(old *bridge.Cloud) *bridge.Cloud {
 	renewMu.Unlock()
 	sm.SetCloud(nc)
 	saveLoginToken(email, nc)
-	fmt.Printf("[session] signed in again (UID: %s)\n", nc.UID)
+	logging.Infof("[session] signed in again (UID: %s)\n", nc.UID)
 	return nc
 }
 
@@ -122,6 +121,6 @@ func saveLoginToken(email string, c *bridge.Cloud) {
 		return nil
 	})
 	if err != nil {
-		fmt.Printf("[session] could not save the new sign-in: %v\n", err)
+		logging.Errorf("[session] could not save the new sign-in: %v\n", err)
 	}
 }

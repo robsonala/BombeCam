@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Fever-r/BombeCam/internal/logging"
 	"github.com/Fever-r/BombeCam/pkg/profile"
 )
 
@@ -240,14 +241,14 @@ func (s *snapshotService) Configure(sm *StreamManager, settings profile.Integrat
 		s.mu.Lock()
 		s.status = fmt.Sprintf("error: port %d is in use by another program", want)
 		s.mu.Unlock()
-		fmt.Printf("[snapshots] cannot listen on port %d: %v\n", want, err)
+		logging.Errorf("[snapshots] cannot listen on port %d: %v\n", want, err)
 		return
 	}
 	srv := &http.Server{Handler: snapshotLANHandler(sm), ReadHeaderTimeout: 5 * time.Second}
 	s.mu.Lock()
 	s.srv, s.port, s.status = srv, want, fmt.Sprintf("listening on port %d", want)
 	s.mu.Unlock()
-	fmt.Printf("[snapshots] serving snapshots to the network on port %d (read-only)\n", want)
+	logging.Infof("[snapshots] serving snapshots to the network on port %d (read-only)\n", want)
 	go func() { _ = srv.Serve(ln) }()
 }
 
